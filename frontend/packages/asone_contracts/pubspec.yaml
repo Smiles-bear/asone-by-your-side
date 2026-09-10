@@ -1,0 +1,15 @@
+name: asone_contracts
+description: Public domain contracts and data models for Azruiyoi.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

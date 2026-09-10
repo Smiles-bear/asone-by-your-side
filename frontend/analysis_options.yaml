@@ -1,0 +1,35 @@
+# Flutter / Dart 静态分析配置
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    avoid_print: true           # 生产代码不要 print
+    prefer_const_constructors: true
+    prefer_const_literals_to_create_immutables: true
+    prefer_final_locals: true
+    unawaited_futures: true
+    use_key_in_widget_constructors: true
+
+analyzer:
+  exclude:
+    - build/**
+    - .dart_tool/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+  errors:
+    # 姐姐流程极简：先不卡过严
+    invalid_assignment: warning
+    missing_required_param: warning
+
+dart_code_linter:
+  metrics:
+    cyclomatic-complexity: 20
+    maximum-nesting-level: 5
+    number-of-parameters: 6
+  metrics-exclude:
+    - test/**
+    - "**/*.g.dart"

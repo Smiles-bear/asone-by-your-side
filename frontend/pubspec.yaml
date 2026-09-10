@@ -1,0 +1,41 @@
+name: azruiyoi_community
+description: Azruiyoi community demo edition (public subset, in-memory DemoCore).
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.8.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  asone_contracts:
+    path: packages/asone_contracts
+  asone_demo_core:
+    path: packages/asone_demo_core
+  fl_chart: ^0.68.0
+  flutter_markdown: ^0.7.4
+  flutter_reorderable_grid_view: 5.7.0
+  flutter_svg: ^2.3.0
+  intl: ^0.20.3
+  package_info_plus: ^8.0.0
+  path_provider: ^2.1.5
+  phosphoricons_flutter: ^1.0.0
+  shared_preferences: ^2.3.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/calendar/
+    - assets/features/
+    - assets/icons/
+    - assets/legal/
+    - assets/sticky/
