@@ -84,6 +84,8 @@ flutter create --platforms=android --org com.ruyi.community .
 
 本仓库公开的源码、契约和演示实现按 Apache License 2.0 发布，详见 [LICENSE](LICENSE)。第三方组件的许可证和通知要求见 `legal/apk_compliance/`。
 
+版权所有 2026 京山市如一软件科技有限公司、何俊雄、胡洋洋。
+
 线上运营版中的闭源模块、私有服务、生产配置和正式签名材料不包含在本仓库的授权范围内。请不要提交 API Key、账号数据、签名文件、生产配置或其他敏感信息。
 
 ## 参与社区
