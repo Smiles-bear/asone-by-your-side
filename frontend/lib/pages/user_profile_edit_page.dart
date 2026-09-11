@@ -1,3 +1,4 @@
+import '../widgets/unsaved_changes_guard.dart';
 import 'package:flutter/material.dart';
 
 import '../services/system_photo_picker.dart';
@@ -110,59 +111,68 @@ class _UserProfileEditPageState extends State<UserProfileEditPage> {
     final displayedAvatar = _restoreDefaultAvatar
         ? ''
         : (_selectedAvatarPath ?? identity.avatarPath);
-    return Scaffold(
-      appBar: AsOneAppBar(
-        title: '个人资料',
-        actions: [
-          TextButton(
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('保存'),
-          ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Center(
-            child: Column(
-              children: [
-                AsOneAvatar(
-                  imagePath: displayedAvatar,
-                  size: 84,
-                  borderRadius: 20,
-                  fallbackIcon: Icons.person,
-                  fallbackColor: Theme.of(context).colorScheme.primary,
-                  backgroundColor: AsOneTheme.cardBg,
-                ),
-                TextButton(onPressed: _chooseAvatar, child: const Text('修改头像')),
-              ],
+    return UnsavedChangesGuard(
+      snapshot: () => [_nicknameController.text, displayedAvatar],
+      ready: true,
+      saving: _saving,
+      onSave: _save,
+      child: Scaffold(
+        appBar: AsOneAppBar(
+          title: '个人资料',
+          actions: [
+            TextButton(
+              onPressed: _saving ? null : _save,
+              child: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('保存'),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _nicknameController,
-            decoration: const InputDecoration(
-              labelText: '昵称',
-              hintText: 'User',
+            const SizedBox(width: 6),
+          ],
+        ),
+        body: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Center(
+              child: Column(
+                children: [
+                  AsOneAvatar(
+                    imagePath: displayedAvatar,
+                    size: 84,
+                    borderRadius: 20,
+                    fallbackIcon: Icons.person,
+                    fallbackColor: Theme.of(context).colorScheme.primary,
+                    backgroundColor: AsOneTheme.cardBg,
+                  ),
+                  TextButton(
+                    onPressed: _chooseAvatar,
+                    child: const Text('修改头像'),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          AsOneSurface(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              title: const Text('账号'),
-              subtitle: Text(identity.accountNumber),
-              leading: const AsOneIcon(AsOneIconName.user),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _nicknameController,
+              decoration: const InputDecoration(
+                labelText: '昵称',
+                hintText: 'User',
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+            AsOneSurface(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                title: const Text('账号'),
+                subtitle: Text(identity.accountNumber),
+                leading: const AsOneIcon(AsOneIconName.user),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

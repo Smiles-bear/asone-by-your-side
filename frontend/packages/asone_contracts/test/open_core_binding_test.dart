@@ -27,6 +27,12 @@ class _FakeOpenCore implements OpenCore {
   ModelServiceRepositoryApi get modelServices => throw UnimplementedError();
 
   @override
+  ModelDiscoveryApi get modelDiscovery => throw UnimplementedError();
+
+  @override
+  CapabilityDetectionApi get capabilityDetection => throw UnimplementedError();
+
+  @override
   CalendarRepositoryApi get calendar => throw UnimplementedError();
 
   @override

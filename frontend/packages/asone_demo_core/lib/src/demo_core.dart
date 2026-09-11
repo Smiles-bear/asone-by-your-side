@@ -5,8 +5,10 @@ import 'seed_data.dart';
 import 'stores/assistant_store.dart';
 import 'stores/board_store.dart';
 import 'stores/calendar_store.dart';
+import 'stores/capability_detection_store.dart';
 import 'stores/conversation_store.dart';
 import 'stores/feature_unread_store.dart';
+import 'stores/model_discovery_store.dart';
 import 'stores/model_service_store.dart';
 import 'stores/sticky_note_store.dart';
 import 'stores/token_usage_store.dart';
@@ -55,6 +57,8 @@ class DemoCore implements OpenCore {
       assistants: assistants,
       conversations: conversations,
       modelServices: modelServices,
+      modelDiscovery: const DemoModelDiscovery(),
+      capabilityDetection: DemoCapabilityDetection(),
       calendar: calendar,
       stickyNotes: stickyNotes,
       messageBoard: board,
@@ -70,6 +74,8 @@ class DemoCore implements OpenCore {
     required DemoAssistantStore assistants,
     required DemoConversationStore conversations,
     required DemoModelServiceStore modelServices,
+    required DemoModelDiscovery modelDiscovery,
+    required DemoCapabilityDetection capabilityDetection,
     required DemoCalendarStore calendar,
     required DemoStickyNoteStore stickyNotes,
     required DemoBoardStore messageBoard,
@@ -78,6 +84,8 @@ class DemoCore implements OpenCore {
   }) : _assistants = assistants,
        _conversations = conversations,
        _modelServices = modelServices,
+       _modelDiscovery = modelDiscovery,
+       _capabilityDetection = capabilityDetection,
        _calendar = calendar,
        _stickyNotes = stickyNotes,
        _messageBoard = messageBoard,
@@ -87,6 +95,8 @@ class DemoCore implements OpenCore {
   final DemoAssistantStore _assistants;
   final DemoConversationStore _conversations;
   final DemoModelServiceStore _modelServices;
+  final DemoModelDiscovery _modelDiscovery;
+  final DemoCapabilityDetection _capabilityDetection;
   final DemoCalendarStore _calendar;
   final DemoStickyNoteStore _stickyNotes;
   final DemoBoardStore _messageBoard;
@@ -101,6 +111,12 @@ class DemoCore implements OpenCore {
 
   @override
   ModelServiceRepositoryApi get modelServices => _modelServices;
+
+  @override
+  ModelDiscoveryApi get modelDiscovery => _modelDiscovery;
+
+  @override
+  CapabilityDetectionApi get capabilityDetection => _capabilityDetection;
 
   @override
   CalendarRepositoryApi get calendar => _calendar;

@@ -97,11 +97,11 @@ class _StickyNoteEditorPageState extends State<StickyNoteEditorPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, 'discard'),
-            child: const Text('放弃'),
+            child: const Text('直接退出'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, 'save'),
-            child: const Text('保存'),
+            child: const Text('保存并退出'),
           ),
         ],
       ),

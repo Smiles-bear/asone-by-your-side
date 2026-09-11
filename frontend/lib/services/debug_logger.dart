@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
 
+import 'model_request_audit_scope.dart';
+
 /// 调试日志持久化接缝。
 ///
 /// 宿主版本可在启动时通过 [DebugLogger.attachPersistence] 挂载持久化实现；
@@ -60,6 +62,11 @@ class DebugLogger {
 
   /// 记录日志。保留同步入口，持久化写入在后台串行执行。
   void log(LogLevel level, String message, {String? tag, String? details}) {
+    final audit = ModelRequestAuditScope.current;
+    if (audit != null) {
+      message = '屏幕操控模型请求日志（正文未记录）';
+      details = audit.toString();
+    }
     final entry = LogEntry(
       level: level,
       message: message,

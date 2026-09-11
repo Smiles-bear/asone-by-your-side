@@ -16,12 +16,12 @@ OUTPUT_ROOT = WEBSITE_ROOT / "legal"
 WORD_NAMESPACE = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 PAGES = {
-    "privacy": "Azruiyoi_隐私政策_V1.0_20260819.docx",
-    "terms": "Azruiyoi_用户协议_V1.0_20260819.docx",
-    "minors": "Azruiyoi_未成年人个人信息保护规则_V1.0_20260819.docx",
+    "privacy": "Azruiyoi_隐私政策_V1.1_20260906.docx",
+    "terms": "Azruiyoi_用户协议_V1.1_20260906.docx",
+    "minors": "Azruiyoi_未成年人个人信息保护规则_V1.1_20260906.docx",
 }
 
-SECTION_PATTERN = re.compile(r"^[一二三四五六七八九十百]+、")
+SECTION_PATTERN = re.compile(r"^[一二三四五六七八九十百]+(?:、|\s+)")
 
 
 def paragraphs_from_docx(path: Path) -> list[str]:
@@ -39,19 +39,24 @@ def paragraphs_from_docx(path: Path) -> list[str]:
 
 
 def extract_metadata(paragraphs: list[str]) -> tuple[list[tuple[str, str]], list[str]]:
-    labels = {"运营者", "联系邮箱", "生效日期"}
+    labels = {"运营者", "联系邮箱", "儿童个人信息保护联系邮箱", "APP备案号"}
     metadata: list[tuple[str, str]] = []
-    content: list[str] = []
     index = 1
 
-    if index < len(paragraphs) and paragraphs[index].startswith(("版本", "适用于")):
-        version = paragraphs[index]
-        if "·" in version:
-            audience, version_number = [item.strip() for item in version.split("·", 1)]
-            metadata.append(("适用范围", audience))
-            metadata.append(("版本", version_number.removeprefix("版本 ")))
-        else:
-            metadata.append(("版本", version.split("：", 1)[-1]))
+    if index < len(paragraphs) and paragraphs[index] == "版本信息":
+        index += 1
+
+    if index < len(paragraphs) and paragraphs[index].startswith("版本 "):
+        version_line = paragraphs[index]
+        version_match = re.search(r"版本\s+(V\d+(?:\.\d+)?)", version_line)
+        updated_match = re.search(r"更新日期\s+([0-9年月日]+)", version_line)
+        effective_match = re.search(r"生效日期\s+([0-9年月日]+)", version_line)
+        if version_match:
+            metadata.append(("版本", version_match.group(1)))
+        if updated_match:
+            metadata.append(("更新日期", updated_match.group(1)))
+        if effective_match:
+            metadata.append(("生效日期", effective_match.group(1)))
         index += 1
 
     while index < len(paragraphs):
@@ -61,8 +66,7 @@ def extract_metadata(paragraphs: list[str]) -> tuple[list[tuple[str, str]], list
         metadata.append((label, paragraphs[index + 1]))
         index += 2
 
-    content.extend(paragraphs[index:])
-    return metadata, content
+    return metadata, paragraphs[index:]
 
 
 def metadata_html(items: list[tuple[str, str]]) -> str:

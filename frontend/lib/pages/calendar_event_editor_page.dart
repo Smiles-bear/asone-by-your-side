@@ -6,6 +6,7 @@ import '../models/assistant.dart';
 import '../services/debug_logger.dart';
 import '../theme/asone_theme.dart';
 import '../widgets/asone_app_bar.dart';
+import '../widgets/unsaved_changes_guard.dart';
 import '../widgets/asone_bottom_sheet.dart';
 import '../widgets/asone_dialog.dart';
 import '../widgets/mind_source_identity.dart';
@@ -88,7 +89,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
   int? _advanceMinutes;
   late String _categoryId;
   bool _saving = false;
-  bool _dirty = false;
 
   bool get _editing => widget.occurrence != null;
 
@@ -123,7 +123,7 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
   }
 
   void _changed() {
-    if (!_dirty) setState(() => _dirty = true);
+    setState(() {});
   }
 
   @override
@@ -132,29 +132,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
     _notes.dispose();
     _interval.dispose();
     super.dispose();
-  }
-
-  Future<bool> _confirmLeave() async {
-    if (!_dirty || _saving) return true;
-    final discard = await showDialog<bool>(
-      context: context,
-      builder: (context) => AsOneDialog(
-        icon: asOneIconData(AsOneIconName.warning),
-        title: '放弃未保存的修改？',
-        content: const Text('当前填写的内容还没有保存。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('继续编辑'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('放弃'),
-          ),
-        ],
-      ),
-    );
-    return discard == true;
   }
 
   CalendarEventInput? _input() {
@@ -251,7 +228,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
             );
         }
       }
-      _dirty = false;
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
       DebugLogger.instance.error(
@@ -342,7 +318,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
       } else {
         _end = updated;
       }
-      _dirty = true;
     });
   }
 
@@ -453,7 +428,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
       } else {
         _end = picked;
       }
-      _dirty = true;
     });
   }
 
@@ -520,7 +494,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
       _interval.text = '1';
       _weekdays = choice == 'weekly' ? {_start.weekday} : <int>{};
       _recurrenceUntil = null;
-      _dirty = true;
     });
   }
 
@@ -664,7 +637,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
       _interval.text = '${result.interval}';
       _weekdays = result.weekdays;
       _recurrenceUntil = result.until;
-      _dirty = true;
     });
   }
 
@@ -703,7 +675,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
     }
     setState(() {
       _advanceMinutes = value;
-      _dirty = true;
     });
   }
 
@@ -714,14 +685,22 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
   @override
   Widget build(BuildContext context) {
     final event = widget.occurrence?.event;
-    return PopScope(
-      canPop: !_dirty,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop) return;
-        if (await _confirmLeave() && context.mounted) {
-          Navigator.pop(context);
-        }
-      },
+    return UnsavedChangesGuard(
+      snapshot: () => [
+        _title.text,
+        _notes.text,
+        _interval.text,
+        _start.toIso8601String(),
+        _end?.toIso8601String(),
+        _allDay,
+        _recurrence,
+        (_weekdays.toList()..sort()),
+        _recurrenceUntil?.toIso8601String(),
+        _advanceMinutes,
+        _categoryId,
+      ],
+      onSave: _save,
+      saving: _saving,
       child: Scaffold(
         appBar: AsOneAppBar(
           title: _editing ? '编辑事项' : '新建事项',
@@ -761,7 +740,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                       selected: category.id == _categoryId,
                       onTap: () => setState(() {
                         _categoryId = category.id;
-                        _dirty = true;
                       }),
                     ),
                 ],
@@ -773,7 +751,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                 value: _allDay,
                 onChanged: (value) => setState(() {
                   _allDay = value;
-                  _dirty = true;
                 }),
               ),
               _DateTimeRow(
@@ -794,7 +771,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                     ? null
                     : () => setState(() {
                         _end = null;
-                        _dirty = true;
                       }),
               ),
               const SizedBox(height: 12),
@@ -823,7 +799,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                       _advanceMinutes = value == 'default'
                           ? null
                           : int.parse(value);
-                      _dirty = true;
                     });
                   },
                   itemBuilder: (_) => const [

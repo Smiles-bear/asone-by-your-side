@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'community_open_core.dart';
 import 'demo_profile_page.dart';
 
 /// 社区演示版入口（阶段 C 快照中将成为公共仓库的 main.dart）。
@@ -18,7 +19,7 @@ import 'demo_profile_page.dart';
 /// 导航仅保留"功能 + 我的"两个公开页签。
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  OpenCoreBinding.attach(DemoCore.withDemoSeed());
+  OpenCoreBinding.attach(CommunityOpenCore(demo: DemoCore.withDemoSeed()));
   runApp(const CommunityPreviewApp());
 }
 

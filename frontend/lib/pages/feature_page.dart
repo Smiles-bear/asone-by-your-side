@@ -177,7 +177,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
     ),
     _TileSpec(
       'play_together',
-      '一起玩，拓展更多游戏',
+      '让助手操作指定 App',
       22.76,
       537,
       155,
@@ -205,7 +205,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
     _ImageSpec('watch_together.png', 43, 401, 60, 60),
     _ImageSpec('listen_together.png', 154, 399, 60, 62),
     _ImageSpec('bluetooth.png', 266, 401, 58, 58),
-    _ImageSpec('play_together.png', 111, 516, 68, 70),
+    _ImageSpec('play_together.png', 104, 508, 82, 86),
     _ImageSpec('more_tools.png', 277, 520, 68, 66),
   ];
   static const _texts = [
@@ -227,7 +227,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
     _TextSpec('一起听音乐', 133.56, 483, width: 100, centered: true),
     _TextSpec('我的设备', 245.08, 462, width: 100, title: true, centered: true),
     _TextSpec('连接身边设备', 245.08, 483, width: 100, centered: true),
-    _TextSpec('一起玩', 36, 550, width: 66, title: true),
+    _TextSpec('屏幕控制', 36, 550, width: 88, title: true),
     _TextSpec('拓展更多游戏', 36, 575, width: 100),
     _TextSpec('更多工具', 203, 550, width: 68, title: true),
     _TextSpec('更多实用工具', 203, 575, width: 80),
@@ -403,7 +403,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
             height: 67,
             child: Semantics(
               button: true,
-              label: '一起玩，拓展更多游戏',
+              label: '让助手操作指定 App',
               child: GestureDetector(
                 key: const Key('feature-together-play-hit-target'),
                 behavior: HitTestBehavior.opaque,

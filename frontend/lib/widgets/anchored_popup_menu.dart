@@ -96,7 +96,20 @@ Future<T?> showAnchoredPopupMenu<T>({
       final bubbleHeight =
           entries.length * rowHeight + verticalPadding * 2 + dividerHeight;
       final popupHeight = bubbleHeight + tailHeight;
-      final preferredLeft = direction == AnchoredPopupDirection.below
+      final belowFits =
+          anchorRect.bottom + anchorGap + popupHeight <=
+          screenSize.height -
+              screenMargin -
+              MediaQuery.paddingOf(dialogContext).bottom;
+      final aboveFits =
+          anchorRect.top - anchorGap - popupHeight >=
+          screenMargin + MediaQuery.paddingOf(dialogContext).top;
+      final effectiveDirection = direction == AnchoredPopupDirection.below
+          ? (belowFits || !aboveFits ? direction : AnchoredPopupDirection.above)
+          : (aboveFits || !belowFits
+                ? direction
+                : AnchoredPopupDirection.below);
+      final preferredLeft = effectiveDirection == AnchoredPopupDirection.below
           ? anchorRect.center.dx - popupWidth + 26
           : anchorRect.center.dx - 26;
       final left = preferredLeft
@@ -112,7 +125,7 @@ Future<T?> showAnchoredPopupMenu<T>({
         20.0,
         popupWidth - 20.0,
       );
-      final preferredTop = direction == AnchoredPopupDirection.below
+      final preferredTop = effectiveDirection == AnchoredPopupDirection.below
           ? anchorRect.bottom + anchorGap
           : anchorRect.top - popupHeight - anchorGap;
       final top = preferredTop
@@ -124,7 +137,7 @@ Future<T?> showAnchoredPopupMenu<T>({
             ),
           )
           .toDouble();
-      final pointsUp = direction == AnchoredPopupDirection.below;
+      final pointsUp = effectiveDirection == AnchoredPopupDirection.below;
 
       final menuContent = Material(
         color: Colors.transparent,

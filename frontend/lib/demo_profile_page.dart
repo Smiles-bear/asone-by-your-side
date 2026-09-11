@@ -1,4 +1,5 @@
 import 'pages/about_azruiyoi_page.dart';
+import 'pages/model_service_list_page.dart';
 import 'pages/privacy_and_agreements_page.dart';
 import 'pages/token_usage_page.dart';
 import 'pages/user_profile_edit_page.dart';
@@ -11,9 +12,7 @@ class DemoProfilePage extends StatelessWidget {
   const DemoProfilePage({super.key});
 
   void _open(BuildContext context, Widget page) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => page),
-    );
+    Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => page));
   }
 
   @override
@@ -56,6 +55,12 @@ class DemoProfilePage extends StatelessWidget {
             title: const Text('Token 统计'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _open(context, const TokenUsagePage()),
+          ),
+          ListTile(
+            key: const Key('demo-profile-model-services'),
+            title: const Text('模型服务'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _open(context, const ModelServiceListPage()),
           ),
           ListTile(
             key: const Key('demo-profile-privacy'),
