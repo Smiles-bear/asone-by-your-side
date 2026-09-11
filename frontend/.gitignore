@@ -2,3 +2,9 @@
 build/
 # lock 含本地镜像源 URL，公共仓库由使用者本地解析生成
 pubspec.lock
+
+# IDE / 工具生成
+.idea/
+*.iml
+.flutter-plugins-dependencies
+.flutter-plugins
