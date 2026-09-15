@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/asone_theme.dart';
 import 'asone_icons.dart';
 
-enum AsOneButtonTone { primary, secondary, ghost, danger }
+enum AsOneButtonTone { primary, secondary, ghost, danger, dangerOutline }
 
 class AsOneButton extends StatelessWidget {
   const AsOneButton({
@@ -29,13 +29,15 @@ class AsOneButton extends StatelessWidget {
       AsOneButtonTone.primary => Colors.white,
       AsOneButtonTone.secondary => AsOneTheme.accent,
       AsOneButtonTone.ghost => AsOneTheme.accent,
-      AsOneButtonTone.danger => Colors.white,
+      AsOneButtonTone.danger => AsOneTheme.danger,
+      AsOneButtonTone.dangerOutline => AsOneTheme.danger,
     };
     final background = switch (tone) {
       AsOneButtonTone.primary => AsOneTheme.iconAccent,
       AsOneButtonTone.secondary => const Color(0xFFFBEAE4),
       AsOneButtonTone.ghost => Colors.transparent,
-      AsOneButtonTone.danger => AsOneTheme.danger,
+      AsOneButtonTone.danger => AsOneTheme.dangerSoft,
+      AsOneButtonTone.dangerOutline => Colors.transparent,
     };
 
     final child = AnimatedSwitcher(
@@ -56,7 +58,13 @@ class AsOneButton extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 if (icon != null) ...[
-                  AsOneIcon(icon!, size: 19, color: foreground),
+                  AsOneIcon(
+                    icon!,
+                    size: 19,
+                    color: onPressed == null
+                        ? AsOneTheme.textDisabled
+                        : foreground,
+                  ),
                   const SizedBox(width: 8),
                 ],
                 Text(label),
@@ -74,7 +82,16 @@ class AsOneButton extends StatelessWidget {
         disabledForegroundColor: AsOneTheme.textDisabled,
         disabledBackgroundColor: tone == AsOneButtonTone.ghost
             ? Colors.transparent
-            : const Color(0xFFF1E8E4),
+            : AsOneTheme.disabledActionBg,
+        side:
+            tone == AsOneButtonTone.dangerOutline ||
+                tone == AsOneButtonTone.danger
+            ? BorderSide(
+                color: onPressed == null || loading
+                    ? AsOneTheme.divider
+                    : AsOneTheme.danger.withValues(alpha: 0.5),
+              )
+            : BorderSide.none,
         textStyle: AsOneTheme.buttonStyle,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),

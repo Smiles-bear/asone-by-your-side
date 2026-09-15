@@ -283,7 +283,7 @@ class _MessageBoardPageState extends State<MessageBoardPage> {
             child: const Text('取消'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AsOneTheme.danger),
+            style: AsOneTheme.dangerConfirmStyle(),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('删除'),
           ),

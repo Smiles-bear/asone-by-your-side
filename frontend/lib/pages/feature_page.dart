@@ -42,11 +42,11 @@ class FeaturePage extends StatelessWidget {
 
   final FeaturePageRoutes routes;
 
-  static const pageColor = AsOneTheme.pageBg;
-  static const headerColor = AsOneTheme.pageBg;
+  static const pageColor = AsOneTheme.mainPageBg;
+  static const headerColor = AsOneTheme.mainHeaderBg;
   static const textColor = Color(0xFF575757);
   static const descriptionColor = AsOneTheme.textTertiary;
-  static const dividerColor = AsOneTheme.divider;
+  static const dividerColor = AsOneTheme.mainHeaderDivider;
 
   @override
   Widget build(BuildContext context) {
@@ -67,26 +67,26 @@ class FeaturePage extends StatelessWidget {
         title: const Text('功能'),
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: dividerColor),
+          child: Divider(height: 1, color: dividerColor),
         ),
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final scale = math.min(constraints.maxWidth / 360, 1.18);
+          final scale = math.min(
+            math.min(constraints.maxWidth / 360, constraints.maxHeight / 620),
+            1.18,
+          );
           return Align(
             alignment: Alignment.topCenter,
-            child: SingleChildScrollView(
-              child: SizedBox(
-                width: 360 * scale,
-                height: 620 * scale,
-                child: Transform.scale(
-                  scale: scale,
-                  alignment: Alignment.topLeft,
-                  child: SizedBox(
-                    width: 360,
-                    height: 620,
-                    child: _FeatureDesignCanvas(routes: routes),
-                  ),
+            child: SizedBox(
+              width: 360 * scale,
+              height: 620 * scale,
+              child: FittedBox(
+                alignment: Alignment.topCenter,
+                child: SizedBox(
+                  width: 360,
+                  height: 620,
+                  child: _FeatureDesignCanvas(routes: routes),
                 ),
               ),
             ),
@@ -177,7 +177,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
     ),
     _TileSpec(
       'play_together',
-      '让助手操作指定 App',
+      '让助手来操作',
       22.76,
       537,
       155,
@@ -198,15 +198,15 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
   static const _images = [
     _ImageSpec('message_board.png', 32, 18, 132, 126),
     _ImageSpec('note.png', 278, 17, 60, 60),
-    _ImageSpec('calendar.png', 281, 109, 56, 56),
+    _ImageSpec('calendar.png', 274, 120, 58, 58),
     _ImageSpec('game.png', 110, 220, 60, 60),
     _ImageSpec('pet.png', 108, 303, 62, 62),
     _ImageSpec('heartbeat.png', 244, 238, 82, 60),
     _ImageSpec('watch_together.png', 43, 401, 60, 60),
     _ImageSpec('listen_together.png', 154, 399, 60, 62),
     _ImageSpec('bluetooth.png', 266, 401, 58, 58),
-    _ImageSpec('play_together.png', 104, 508, 82, 86),
-    _ImageSpec('more_tools.png', 277, 520, 68, 66),
+    _ImageSpec('play_together.png', 105, 521, 68, 71),
+    _ImageSpec('more_tools.png', 270, 527, 64, 62),
   ];
   static const _texts = [
     _TextSpec('留言板', 36.05, 151.5, width: 120, title: true),
@@ -228,7 +228,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
     _TextSpec('我的设备', 245.08, 462, width: 100, title: true, centered: true),
     _TextSpec('连接身边设备', 245.08, 483, width: 100, centered: true),
     _TextSpec('屏幕控制', 36, 550, width: 88, title: true),
-    _TextSpec('拓展更多游戏', 36, 575, width: 100),
+    _TextSpec('让助手来操作', 36, 575, width: 110),
     _TextSpec('更多工具', 203, 550, width: 68, title: true),
     _TextSpec('更多实用工具', 203, 575, width: 80),
   ];
@@ -403,7 +403,7 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
             height: 67,
             child: Semantics(
               button: true,
-              label: '让助手操作指定 App',
+              label: '屏幕控制，让助手来操作',
               child: GestureDetector(
                 key: const Key('feature-together-play-hit-target'),
                 behavior: HitTestBehavior.opaque,
@@ -492,16 +492,6 @@ class _FeatureDesignCanvasState extends State<_FeatureDesignCanvas> {
                 onTap: () => _openPage(const CalendarPage()),
                 child: const SizedBox.expand(),
               ),
-            ),
-          ),
-          const Positioned(
-            left: 0,
-            right: 0,
-            top: 619,
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: FeaturePage.dividerColor,
             ),
           ),
           if (unread.messageBoardCount > 0)

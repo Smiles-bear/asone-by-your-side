@@ -60,8 +60,8 @@ class DemoConversationStore implements ConversationRepositoryApi {
       id: demoId('conversation'),
       title: title,
       assistantId: assistantId,
-      createdAt: DateTime.now().toUtc(),
-      updatedAt: DateTime.now().toUtc(),
+      createdAt: demoNow().toUtc(),
+      updatedAt: demoNow().toUtc(),
     );
     _rows.add({...conversation.toJson(), 'created_at': now, 'updated_at': now});
     return conversation;

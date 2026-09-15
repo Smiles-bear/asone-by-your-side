@@ -86,7 +86,7 @@ class DemoBoardStore implements MessageBoardRepositoryApi {
       authorAssistantId: authorAssistantId,
       generationTaskId: generationTaskId,
       generationKind: generationKind,
-      createdAt: DateTime.now(),
+      createdAt: demoNow(),
     );
     _posts.add(post.toJson());
     if (authorType == 'assistant') _readState.notify();
@@ -97,7 +97,7 @@ class DemoBoardStore implements MessageBoardRepositoryApi {
   Future<bool> deletePost(String postId) async {
     final row = _postRow(postId);
     if (row == null || !_isActive(row)) return false;
-    final now = DateTime.now().toIso8601String();
+    final now = demoNowIso();
     row['deleted_at'] = now;
     for (final comment in _comments) {
       if (comment['post_id'] == postId && comment['deleted_at'] == null) {
@@ -136,7 +136,7 @@ class DemoBoardStore implements MessageBoardRepositoryApi {
 
   @override
   Future<void> markRead({DateTime? through}) async {
-    _readState.setLastRead('message_board', through ?? DateTime.now());
+    _readState.setLastRead('message_board', through ?? demoNow());
   }
 
   @override
@@ -225,7 +225,7 @@ class DemoBoardStore implements MessageBoardRepositoryApi {
       parentCommentId: parentCommentId,
       generationTaskId: generationTaskId,
       generationKind: generationKind,
-      createdAt: DateTime.now(),
+      createdAt: demoNow(),
     );
     _comments.add(comment.toJson());
     if (autoLikeUserPost &&
@@ -244,7 +244,7 @@ class DemoBoardStore implements MessageBoardRepositoryApi {
   Future<bool> deleteComment(String commentId) async {
     for (final row in _comments) {
       if (row['comment_id'] == commentId && _isActive(row)) {
-        row['deleted_at'] = DateTime.now().toIso8601String();
+        row['deleted_at'] = demoNowIso();
         return true;
       }
     }

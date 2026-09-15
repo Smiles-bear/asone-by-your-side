@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 class AsOneTheme {
   // 页面背景：设计图暖米色
   static const Color pageBg = Color(0xFFFFF8F5);
+  static const Color mainPageBg = Color(0xFFFFF9F8);
+  static const Color mainHeaderBg = Color(0xFFFFF5F2);
+  static const Color mainHeaderDivider = Color(0x80D9D9D9);
   static const Color chatBg = Color(0xFFFFF8F5);
   static const Color aiBubble = Color(0xFFFFF0E6);
   static const Color userBubble = Color(0xFFFFFFFF);
@@ -22,9 +25,10 @@ class AsOneTheme {
   static const Color tabInactiveSoft = Color(0xFFF2A896);
   // 列表项按压/选中态浅杏底
   static const Color tileHighlight = Color(0xFFFBEAE3);
-  // Destructive actions remain unmistakably red without the high-saturation
-  // alarm tone previously used by full-width buttons.
-  static const Color danger = Color(0xFFB85A55);
+  // 危险操作只用低饱和文字与浅底提示，避免形成刺眼的大色块。
+  static const Color danger = Color(0xFFA85A55);
+  static const Color dangerSoft = Color(0xFFFFF0ED);
+  static const Color disabledActionBg = Color(0xFFF1E8E4);
   // Material red reserved for unread badges and notification dots. It must not
   // inherit the deliberately muted destructive-action color above.
   static const Color notificationBadge = Color(0xFFF44336);
@@ -99,6 +103,31 @@ class AsOneTheme {
     fontWeight: FontWeight.w500,
   );
 
+  static ButtonStyle filledActionStyle(Color primary) => FilledButton.styleFrom(
+    minimumSize: const Size(88, 48),
+    backgroundColor: primary,
+    foregroundColor: Colors.white,
+    disabledBackgroundColor: disabledActionBg,
+    disabledForegroundColor: textDisabled,
+    elevation: 0,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    textStyle: buttonStyle,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+  );
+
+  static ButtonStyle dangerConfirmStyle() => FilledButton.styleFrom(
+    minimumSize: const Size(88, 48),
+    backgroundColor: dangerSoft,
+    foregroundColor: danger,
+    disabledBackgroundColor: disabledActionBg,
+    disabledForegroundColor: textDisabled,
+    elevation: 0,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+    textStyle: buttonStyle,
+    side: BorderSide(color: danger.withValues(alpha: 0.28)),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+  );
+
   /// 主题色映射
   static Color accentFor(String key) {
     switch (key) {
@@ -140,6 +169,10 @@ class AsOneTheme {
     colorScheme: ColorScheme.fromSeed(
       seedColor: accentColor,
       primary: accentColor,
+      onPrimary: Colors.white,
+      error: danger,
+      onError: Colors.white,
+      errorContainer: dangerSoft,
       surface: pageBg,
     ),
     textTheme: const TextTheme(
@@ -203,19 +236,19 @@ class AsOneTheme {
     ),
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
-        elevation: 0,
         backgroundColor: accentColor,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-        textStyle: buttonStyle,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: accentColor,
+        backgroundColor: Colors.transparent,
+        disabledForegroundColor: textDisabled,
+        minimumSize: const Size(88, 48),
         side: BorderSide(color: accentColor.withValues(alpha: 0.45)),
-        textStyle: buttonStyle,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),

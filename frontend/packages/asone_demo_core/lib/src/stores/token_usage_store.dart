@@ -1,5 +1,7 @@
 import 'package:asone_contracts/asone_contracts.dart';
 
+import '../demo_ids.dart';
+
 /// In-memory [TokenUsageApi] implementation (read-only statistics).
 ///
 /// 演示版无记忆域：taskType 'memory_rebuild' 返回零值/空列表。
@@ -46,7 +48,7 @@ class DemoTokenUsageStore implements TokenUsageApi {
 
   @override
   Future<Map<String, dynamic>> getUsageOverview() async {
-    final now = DateTime.now();
+    final now = demoNow();
     final todayStart = DateTime(now.year, now.month, now.day);
     final all = _rows.toList();
     final todayRows = _filter(startTime: todayStart).toList();

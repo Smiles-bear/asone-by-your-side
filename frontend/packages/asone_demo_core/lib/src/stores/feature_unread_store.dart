@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:asone_contracts/asone_contracts.dart';
 
+import '../demo_ids.dart';
 import '../read_state.dart';
 import 'board_store.dart';
 import 'calendar_store.dart';
@@ -57,7 +58,7 @@ class DemoFeatureUnreadStore implements FeatureUnreadApi {
 
   @override
   Future<void> markRead(FeatureUnreadKind kind, {DateTime? through}) async {
-    _readState.setLastRead(kind.key, through ?? DateTime.now());
+    _readState.setLastRead(kind.key, through ?? demoNow());
     await refresh();
   }
 

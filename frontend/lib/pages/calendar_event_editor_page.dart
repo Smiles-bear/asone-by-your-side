@@ -9,20 +9,13 @@ import '../widgets/asone_app_bar.dart';
 import '../widgets/unsaved_changes_guard.dart';
 import '../widgets/asone_bottom_sheet.dart';
 import '../widgets/asone_dialog.dart';
+import '../widgets/asone_date_picker.dart';
 import '../widgets/mind_source_identity.dart';
 import '../widgets/asone_feedback.dart';
 import '../widgets/asone_icons.dart';
+import 'calendar_recurrence_sheet.dart';
 
 enum CalendarSeriesScope { occurrence, forward, series }
-
-class _RecurrenceDraft {
-  const _RecurrenceDraft(this.kind, this.interval, this.weekdays, this.until);
-
-  final String kind;
-  final int interval;
-  final Set<int> weekdays;
-  final DateTime? until;
-}
 
 CalendarEventInput anchorSeriesEditInput(
   CalendarEventInput input,
@@ -261,7 +254,7 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
               child: const Text('取消'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AsOneTheme.danger),
+              style: AsOneTheme.dangerConfirmStyle(),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('删除'),
             ),
@@ -298,11 +291,12 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
 
   Future<void> _pickDate(bool start) async {
     final value = start ? _start : (_end ?? _start);
-    final date = await showDatePicker(
+    final date = await showAsOneDatePicker(
       context: context,
       initialDate: value,
       firstDate: DateTime(2000),
       lastDate: DateTime(2100),
+      title: start ? '选择开始日期' : '选择结束日期',
     );
     if (date == null) return;
     setState(() {
@@ -451,187 +445,22 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
             ? '每年 ${_start.month} 月 ${_start.day} 日'
             : '每 ${_interval.text} 年';
       default:
-        return '不重复';
+        return '永不';
     }
   }
 
   Future<void> _chooseRecurrence() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      useSafeArea: true,
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const ListTile(
-            title: Text('重复'),
-            subtitle: Text('选择常用规则，复杂规则可进入自定义'),
-          ),
-          for (final entry in <String, String>{
-            'none': '不重复',
-            'daily': '每天',
-            'weekly': '每周 · 周${'一二三四五六日'[_start.weekday - 1]}',
-            'monthly': '每月 · ${_start.day} 日',
-            'yearly': '每年 · ${_start.month} 月 ${_start.day} 日',
-            'custom': '自定义…',
-          }.entries)
-            ListTile(
-              title: Text(entry.value),
-              trailing: entry.key == _recurrence && _interval.text == '1'
-                  ? const Icon(Icons.check, color: AsOneTheme.accent)
-                  : null,
-              onTap: () => Navigator.pop(context, entry.key),
-            ),
-        ],
+    final result = await chooseCalendarRecurrence(
+      context,
+      CalendarRecurrenceDraft(
+        _recurrence,
+        int.tryParse(_interval.text) ?? 1,
+        _weekdays,
+        _recurrenceUntil,
       ),
+      start: _start,
     );
-    if (choice == null) return;
-    if (choice == 'custom') {
-      await _editCustomRecurrence();
-      return;
-    }
-    setState(() {
-      _recurrence = choice;
-      _interval.text = '1';
-      _weekdays = choice == 'weekly' ? {_start.weekday} : <int>{};
-      _recurrenceUntil = null;
-    });
-  }
-
-  Future<void> _editCustomRecurrence() async {
-    var kind = _recurrence == 'none' ? 'weekly' : _recurrence;
-    var interval = int.tryParse(_interval.text) ?? 1;
-    final weekdays = {
-      ...(_weekdays.isEmpty ? {_start.weekday} : _weekdays),
-    };
-    var until = _recurrenceUntil;
-    final result = await showModalBottomSheet<_RecurrenceDraft>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            12,
-            20,
-            20 + MediaQuery.viewInsetsOf(context).bottom,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        '自定义重复',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(
-                        context,
-                        _RecurrenceDraft(kind, interval, weekdays, until),
-                      ),
-                      child: const Text('完成'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Text('每'),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 72,
-                      child: TextFormField(
-                        initialValue: '$interval',
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        onChanged: (value) =>
-                            interval = int.tryParse(value) ?? 1,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: kind,
-                        items:
-                            const {
-                                  'daily': '天',
-                                  'weekly': '周',
-                                  'monthly': '个月',
-                                  'yearly': '年',
-                                }.entries
-                                .map(
-                                  (entry) => DropdownMenuItem(
-                                    value: entry.key,
-                                    child: Text(entry.value),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (value) => setSheetState(() {
-                          kind = value ?? 'weekly';
-                        }),
-                      ),
-                    ),
-                  ],
-                ),
-                if (kind == 'weekly') ...[
-                  const SizedBox(height: 18),
-                  const Text('重复于'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    children: List.generate(7, (index) {
-                      final day = index + 1;
-                      return FilterChip(
-                        label: Text('一二三四五六日'[index]),
-                        selected: weekdays.contains(day),
-                        onSelected: (selected) => setSheetState(() {
-                          selected ? weekdays.add(day) : weekdays.remove(day);
-                        }),
-                      );
-                    }),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('结束'),
-                  subtitle: Text(until == null ? '永不' : _date(until!)),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () async {
-                    final date = await showDatePicker(
-                      context: context,
-                      initialDate: until ?? _start,
-                      firstDate: _start,
-                      lastDate: DateTime(2100),
-                    );
-                    if (date != null) setSheetState(() => until = date);
-                  },
-                ),
-                if (until != null)
-                  TextButton(
-                    onPressed: () => setSheetState(() => until = null),
-                    child: const Text('改为永不结束'),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    if (result == null) return;
-    if (result.interval < 1 ||
-        (result.kind == 'weekly' && result.weekdays.isEmpty)) {
-      _message('请填写有效的重复规则');
-      return;
-    }
+    if (result == null || !mounted) return;
     setState(() {
       _recurrence = result.kind;
       _interval.text = '${result.interval}';
@@ -730,19 +559,25 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
               const SizedBox(height: 4),
               Text('类别', style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: 10),
-              Wrap(
-                spacing: 9,
-                runSpacing: 10,
-                children: [
-                  for (final category in CalendarCategory.values)
-                    _CategoryChoice(
-                      category: category,
-                      selected: category.id == _categoryId,
-                      onTap: () => setState(() {
-                        _categoryId = category.id;
-                      }),
-                    ),
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) => Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    for (final category in CalendarCategory.values)
+                      SizedBox(
+                        key: Key('calendar-category-${category.id}'),
+                        width: (constraints.maxWidth - 24) / 5,
+                        child: _CategoryChoice(
+                          category: category,
+                          selected: category.id == _categoryId,
+                          onTap: () => setState(() {
+                            _categoryId = category.id;
+                          }),
+                        ),
+                      ),
+                  ],
+                ),
               ),
               const SizedBox(height: 10),
               SwitchListTile(
@@ -773,7 +608,7 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                         _end = null;
                       }),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 4),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('重复'),
@@ -781,7 +616,7 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: _chooseRecurrence,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 4),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('提前时间'),
@@ -847,8 +682,6 @@ class _CalendarEventEditorPageState extends State<CalendarEventEditorPage> {
       ),
     );
   }
-
-  String _date(DateTime value) => '${value.year}年${value.month}月${value.day}日';
 }
 
 class _DateTimeRow extends StatelessWidget {
@@ -931,7 +764,6 @@ class _CategoryChoice extends StatelessWidget {
         onTap: onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
-          width: 58,
           padding: const EdgeInsets.symmetric(vertical: 7),
           decoration: BoxDecoration(
             color: selected ? category.paleColor : Colors.transparent,

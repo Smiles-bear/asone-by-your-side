@@ -24,6 +24,9 @@ class _FakeOpenCore implements OpenCore {
   ConversationRepositoryApi get conversations => throw UnimplementedError();
 
   @override
+  MessageRepositoryApi get messages => throw UnimplementedError();
+
+  @override
   ModelServiceRepositoryApi get modelServices => throw UnimplementedError();
 
   @override

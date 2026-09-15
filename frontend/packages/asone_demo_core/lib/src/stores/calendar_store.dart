@@ -104,7 +104,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
         : input.recurrenceWeekdays.join(',');
     row['recurrence_until'] = input.recurrenceUntil?.toIso8601String();
     row['custom_advance_minutes'] = input.customAdvanceMinutes;
-    row['updated_at'] = DateTime.now().toIso8601String();
+    row['updated_at'] = demoNowIso();
   }
 
   CalendarOccurrence? _occurrenceFrom(
@@ -243,7 +243,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
     String action, {
     CalendarEventInput? input,
   }) {
-    final now = DateTime.now().toIso8601String();
+    final now = demoNowIso();
     final existing = _exceptionAt(eventId, occurrenceKey);
     if (existing != null) {
       existing['action'] = action;
@@ -292,7 +292,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
       throw ArgumentError('请填写事项标题');
     }
     _validateAuthor(authorType, authorAssistantId);
-    final now = DateTime.now();
+    final now = demoNow();
     final event = CalendarEventItem(
       eventId: demoId('event'),
       content: title,
@@ -403,7 +403,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
     }
     final occurrenceDate = DateTime.parse(occurrenceKey);
     row['recurrence_until'] = _dayBefore(occurrenceDate).toIso8601String();
-    row['updated_at'] = DateTime.now().toIso8601String();
+    row['updated_at'] = demoNowIso();
     return createEvent(
       input: input,
       authorType: row['author_type'] as String? ?? 'user',
@@ -434,7 +434,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
     final row = _requireWritable(eventId, assistantId);
     final occurrenceDate = DateTime.parse(occurrenceKey);
     row['recurrence_until'] = _dayBefore(occurrenceDate).toIso8601String();
-    row['updated_at'] = DateTime.now().toIso8601String();
+    row['updated_at'] = demoNowIso();
     _exceptions.removeWhere(
       (item) =>
           item['event_id'] == eventId &&
@@ -446,7 +446,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
   @override
   Future<bool> deleteSeries(String eventId, {String? assistantId}) async {
     final row = _requireWritable(eventId, assistantId);
-    row['deleted_at'] = DateTime.now().toIso8601String();
+    row['deleted_at'] = demoNowIso();
     _exceptions.removeWhere((item) => item['event_id'] == eventId);
     return true;
   }
@@ -454,7 +454,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
   @override
   Future<bool> deleteSingle(String eventId, {String? assistantId}) async {
     final row = _requireWritable(eventId, assistantId);
-    row['deleted_at'] = DateTime.now().toIso8601String();
+    row['deleted_at'] = demoNowIso();
     return true;
   }
 
@@ -462,7 +462,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
   Future<bool> deleteEvent(String eventId) async {
     final row = _eventRow(eventId);
     if (row == null || _isDeleted(row)) return false;
-    row['deleted_at'] = DateTime.now().toIso8601String();
+    row['deleted_at'] = demoNowIso();
     return true;
   }
 
@@ -618,7 +618,7 @@ class DemoCalendarStore implements CalendarRepositoryApi {
     int days, {
     DateTime? now,
   }) async {
-    final moment = now ?? DateTime.now();
+    final moment = now ?? demoNow();
     final end = moment.add(Duration(days: days));
     final list =
         _events

@@ -14,7 +14,9 @@ class CommunityOpenCore implements OpenCore {
   CommunityOpenCore({required DemoCore demo})
     : _demo = demo,
       _discovery = ModelDiscoveryService(),
-      _capabilityDetection = CommunityCapabilityDetection(demo: demo);
+      _capabilityDetection = CommunityCapabilityDetection(
+        modelServices: demo.modelServices,
+      );
 
   final DemoCore _demo;
   final ModelDiscoveryService _discovery;
@@ -25,6 +27,9 @@ class CommunityOpenCore implements OpenCore {
 
   @override
   ConversationRepositoryApi get conversations => _demo.conversations;
+
+  @override
+  MessageRepositoryApi get messages => _demo.messages;
 
   @override
   ModelServiceRepositoryApi get modelServices => _demo.modelServices;
@@ -54,8 +59,9 @@ class CommunityOpenCore implements OpenCore {
 /// 真实能力检测门面：会话与探针走真实网络调用，
 /// 配置与快照持久化走内存模型服务仓储（进程退出后重置）。
 class CommunityCapabilityDetection implements CapabilityDetectionApi {
-  CommunityCapabilityDetection({required DemoCore demo})
-    : _modelServices = demo.modelServices;
+  CommunityCapabilityDetection({
+    required ModelServiceRepositoryApi modelServices,
+  }) : _modelServices = modelServices;
 
   final ModelServiceRepositoryApi _modelServices;
 

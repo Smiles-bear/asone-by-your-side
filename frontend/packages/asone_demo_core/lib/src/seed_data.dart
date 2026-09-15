@@ -8,6 +8,7 @@ class DemoSeedData {
   const DemoSeedData({
     this.assistants = const [],
     this.conversations = const [],
+    this.messages = const [],
     this.modelServices = const [],
     this.boardPosts = const [],
     this.boardComments = const [],
@@ -21,6 +22,7 @@ class DemoSeedData {
 
   final List<Map<String, dynamic>> assistants;
   final List<Map<String, dynamic>> conversations;
+  final List<Map<String, dynamic>> messages;
   final List<Map<String, dynamic>> modelServices;
   final List<Map<String, dynamic>> boardPosts;
   final List<Map<String, dynamic>> boardComments;
@@ -297,11 +299,128 @@ class DemoSeedData {
       ),
     ];
 
+    final messages = <Map<String, dynamic>>[
+      {
+        'id': 'demo-msg-xiaoru-1',
+        'conversation_id': 'demo-conversation-xiaoru',
+        'role': 'user',
+        'content': '小如，早上好呀',
+        'created_at': ago(const Duration(days: 2, hours: 3)).toIso8601String(),
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-xiaoru-2',
+        'conversation_id': 'demo-conversation-xiaoru',
+        'role': 'assistant',
+        'content': '早上好！今天天气不错，有什么安排吗？',
+        'created_at': ago(
+          const Duration(days: 2, hours: 2, minutes: 55),
+        ).toIso8601String(),
+        'answer_status': 'completed',
+        'elapsed_ms': 820,
+        'reasoning': '用户在打招呼，回应并主动询问今天的安排。',
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-xiaoru-3',
+        'conversation_id': 'demo-conversation-xiaoru',
+        'role': 'user',
+        'content': '帮我把周末读书会的报名链接记一下',
+        'created_at': ago(
+          const Duration(days: 2, hours: 2, minutes: 50),
+        ).toIso8601String(),
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-xiaoru-4',
+        'conversation_id': 'demo-conversation-xiaoru',
+        'role': 'assistant',
+        'content': '好的，链接已经附在这条消息里，周末前我会提醒你。',
+        'created_at': ago(
+          const Duration(days: 2, hours: 2, minutes: 44),
+        ).toIso8601String(),
+        'answer_status': 'completed',
+        'elapsed_ms': 1150,
+        'tool_used': false,
+        'attachments': [
+          {
+            'attachment_id': 'demo-att-book-club',
+            'original_name': '读书会报名',
+            'status': 'available',
+            'mime_type': 'text/uri-list',
+            'source_url': 'https://example.invalid/book-club',
+          },
+        ],
+      },
+      {
+        'id': 'demo-msg-xiaoru-5',
+        'conversation_id': 'demo-conversation-xiaoru',
+        'role': 'user',
+        'content': '顺便看看明天的日程',
+        'created_at': ago(const Duration(days: 1, hours: 4)).toIso8601String(),
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-xiaoru-6',
+        'conversation_id': 'demo-conversation-xiaoru',
+        'role': 'assistant',
+        'content': '',
+        'created_at': ago(
+          const Duration(days: 1, hours: 3, minutes: 58),
+        ).toIso8601String(),
+        'answer_status': 'failed',
+        'failure_hint': '演示数据：未连接模型服务，配置 API Key 后将真实回复',
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-alan-1',
+        'conversation_id': 'demo-conversation-alan',
+        'role': 'user',
+        'content': '阿澜，帮我列一下本周待办',
+        'created_at': ago(const Duration(days: 1, hours: 2)).toIso8601String(),
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-alan-2',
+        'conversation_id': 'demo-conversation-alan',
+        'role': 'assistant',
+        'content': '本周待办建议：\n1. 周一提交项目周报\n2. 周三下午复盘会\n3. 周五整理读书笔记',
+        'created_at': ago(
+          const Duration(days: 1, hours: 1, minutes: 58),
+        ).toIso8601String(),
+        'answer_status': 'completed',
+        'elapsed_ms': 990,
+        'reasoning': '用户需要待办整理，按时间顺序给出结构化清单。',
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-alan-3',
+        'conversation_id': 'demo-conversation-alan',
+        'role': 'user',
+        'content': '把复盘会挪到周四',
+        'created_at': ago(const Duration(hours: 20)).toIso8601String(),
+        'tool_used': false,
+      },
+      {
+        'id': 'demo-msg-alan-4',
+        'conversation_id': 'demo-conversation-alan',
+        'role': 'assistant',
+        'content': '好的，复盘会已调整到周四下午。',
+        'created_at': ago(
+          const Duration(hours: 19, minutes: 58),
+        ).toIso8601String(),
+        'answer_status': 'completed',
+        'elapsed_ms': 610,
+        'tool_used': false,
+      },
+    ];
+
     return DemoSeedData(
       assistants: [xiaoru.toJson(), alan.toJson()],
       conversations: conversations
           .map((conversation) => conversation.toJson())
           .toList(),
+      messages: messages,
       modelServices: [modelService.toJson()],
       boardPosts: boardPosts,
       boardComments: boardComments,

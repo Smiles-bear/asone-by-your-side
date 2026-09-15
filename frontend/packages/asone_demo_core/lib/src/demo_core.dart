@@ -8,6 +8,7 @@ import 'stores/calendar_store.dart';
 import 'stores/capability_detection_store.dart';
 import 'stores/conversation_store.dart';
 import 'stores/feature_unread_store.dart';
+import 'stores/message_store.dart';
 import 'stores/model_discovery_store.dart';
 import 'stores/model_service_store.dart';
 import 'stores/sticky_note_store.dart';
@@ -53,9 +54,11 @@ class DemoCore implements OpenCore {
       calendar: calendar,
     );
     final tokenUsage = DemoTokenUsageStore(seed: data.tokenRecords);
+    final messages = DemoMessageStore(seed: data.messages);
     return DemoCore._(
       assistants: assistants,
       conversations: conversations,
+      messages: messages,
       modelServices: modelServices,
       modelDiscovery: const DemoModelDiscovery(),
       capabilityDetection: DemoCapabilityDetection(),
@@ -73,6 +76,7 @@ class DemoCore implements OpenCore {
   DemoCore._({
     required DemoAssistantStore assistants,
     required DemoConversationStore conversations,
+    required DemoMessageStore messages,
     required DemoModelServiceStore modelServices,
     required DemoModelDiscovery modelDiscovery,
     required DemoCapabilityDetection capabilityDetection,
@@ -83,6 +87,7 @@ class DemoCore implements OpenCore {
     required DemoTokenUsageStore tokenUsage,
   }) : _assistants = assistants,
        _conversations = conversations,
+       _messages = messages,
        _modelServices = modelServices,
        _modelDiscovery = modelDiscovery,
        _capabilityDetection = capabilityDetection,
@@ -94,6 +99,7 @@ class DemoCore implements OpenCore {
 
   final DemoAssistantStore _assistants;
   final DemoConversationStore _conversations;
+  final DemoMessageStore _messages;
   final DemoModelServiceStore _modelServices;
   final DemoModelDiscovery _modelDiscovery;
   final DemoCapabilityDetection _capabilityDetection;
@@ -108,6 +114,9 @@ class DemoCore implements OpenCore {
 
   @override
   ConversationRepositoryApi get conversations => _conversations;
+
+  @override
+  MessageRepositoryApi get messages => _messages;
 
   @override
   ModelServiceRepositoryApi get modelServices => _modelServices;

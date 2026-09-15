@@ -164,7 +164,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
       throw ArgumentError('请填写纸条内容');
     }
     _validateAuthor(authorType, authorAssistantId);
-    final now = DateTime.now();
+    final now = demoNow();
     final note = StickyNoteItem(
       noteId: demoId('note'),
       content: body,
@@ -204,7 +204,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
       throw ArgumentError('请至少填写一项清单');
     }
     _validateAuthor(authorType, authorAssistantId);
-    final now = DateTime.now();
+    final now = demoNow();
     final allChecked = drafts.every((item) => item.checked);
     final noteId = demoId('note');
     final note = StickyNoteItem(
@@ -279,7 +279,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
     if (noteType == 'checklist' && drafts.isEmpty) {
       throw ArgumentError('请至少填写一项清单');
     }
-    final now = DateTime.now();
+    final now = demoNow();
     if (title != null) row['title'] = _cleanOptional(title);
     row['note_type'] = noteType;
     row['content'] = noteType == 'text' ? body : '';
@@ -318,7 +318,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
     if (itemRow == null) {
       throw StateError('清单项不存在');
     }
-    final now = DateTime.now();
+    final now = demoNow();
     itemRow['checked'] = checked ? 1 : 0;
     itemRow['checked_at'] = checked ? now.toIso8601String() : null;
     itemRow['updated_at'] = now.toIso8601String();
@@ -335,7 +335,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
   Future<bool> setCompletion(String noteId, String reason) async {
     final row = _noteRow(noteId);
     if (row == null || _isDeleted(row)) return false;
-    final now = DateTime.now();
+    final now = demoNow();
     row['completion_state'] = 'completed';
     row['completion_reason'] = reason;
     row['completed_at'] = now.toIso8601String();
@@ -350,7 +350,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
     row['completion_state'] = 'open';
     row['completion_reason'] = null;
     row['completed_at'] = null;
-    row['updated_at'] = DateTime.now().toIso8601String();
+    row['updated_at'] = demoNowIso();
     return true;
   }
 
@@ -360,7 +360,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
     if (row == null || _isDeleted(row)) return false;
     row['pinned'] = pinned ? 1 : 0;
     row['wall_order'] = _nextWallOrder(pinned: pinned);
-    row['updated_at'] = DateTime.now().toIso8601String();
+    row['updated_at'] = demoNowIso();
     return true;
   }
 
@@ -406,7 +406,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
 
   @override
   Future<int> completeExpired({DateTime? now}) async {
-    final moment = now ?? DateTime.now();
+    final moment = now ?? demoNow();
     var count = 0;
     for (final row in _notes) {
       if (row['completion_state'] != 'open') continue;
@@ -439,7 +439,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
 
   @override
   Future<List<StickyNoteItem>> listOpen({DateTime? now}) async =>
-      _sortedOpen(now ?? DateTime.now());
+      _sortedOpen(now ?? demoNow());
 
   @override
   Future<List<StickyNoteItem>> listHistory({bool completedOnly = false}) async {
@@ -527,7 +527,7 @@ class DemoStickyNoteStore implements StickyNoteRepositoryApi {
           .toList();
 
   @override
-  Future<int> countActive() async => _sortedOpen(DateTime.now()).length;
+  Future<int> countActive() async => _sortedOpen(demoNow()).length;
 
   /// Demo-internal: latest assistant-authored creation timestamp.
   DateTime? latestAssistantCreatedAt() {

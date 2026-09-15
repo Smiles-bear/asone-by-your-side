@@ -10,21 +10,33 @@ class AsOneAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.subtitle,
     this.actions,
     this.leading,
+    this.mainPage = false,
   });
 
   final String title;
   final String? subtitle;
   final List<Widget>? actions;
   final Widget? leading;
+  final bool mainPage;
 
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+  Size get preferredSize =>
+      Size.fromHeight(kToolbarHeight + (mainPage ? 1 : 0));
 
   @override
   Widget build(BuildContext context) {
     return AppBar(
+      backgroundColor: mainPage ? AsOneTheme.mainHeaderBg : null,
+      surfaceTintColor: mainPage ? Colors.transparent : null,
+      scrolledUnderElevation: mainPage ? 0 : null,
+      bottom: mainPage
+          ? const PreferredSize(
+              preferredSize: Size.fromHeight(1),
+              child: Divider(height: 1, color: AsOneTheme.mainHeaderDivider),
+            )
+          : null,
       title: subtitle == null
-          ? Text(title)
+          ? Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)
           : Column(
               mainAxisSize: MainAxisSize.min,
               children: [

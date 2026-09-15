@@ -49,7 +49,7 @@ class DemoAssistantStore implements AssistantRepositoryApi {
     if (trimmed.isEmpty) {
       throw ArgumentError('请填写助手名称');
     }
-    final now = DateTime.now().toUtc();
+    final now = demoNow().toUtc();
     final assistant = Assistant(
       id: demoId('assistant'),
       name: trimmed,

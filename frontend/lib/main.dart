@@ -1,25 +1,30 @@
 import 'dart:async';
 
 import 'package:asone_contracts/asone_contracts.dart' show OpenCoreBinding;
-import 'package:asone_demo_core/asone_demo_core.dart';
 import 'pages/feature_page.dart';
 import 'pages/legal_consent_page.dart';
+import 'pages/conversation_list_page.dart';
 import 'services/legal_consent_service.dart';
 import 'theme/asone_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'community_open_core.dart';
+import 'community_conversation_routes.dart';
+import 'community_assistant_page.dart';
 import 'demo_profile_page.dart';
+import 'public_core.dart';
 
-/// 社区演示版入口（阶段 C 快照中将成为公共仓库的 main.dart）。
+/// 社区版入口（阶段 C 快照中将成为公共仓库的 main.dart）。
 ///
-/// 绑定 DemoCore（内存演示数据），无后台任务与通知服务初始化，
-/// 导航仅保留"功能 + 我的"两个公开页签。
-void main() {
+/// 公开聊天、模型服务与基础本地数据绑定 [PublicCore]；无后台任务与通知
+/// 服务初始化，导航保留正式版的“聊天 + 助手 + 功能 + 我的”四个页签。
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  OpenCoreBinding.attach(CommunityOpenCore(demo: DemoCore.withDemoSeed()));
+  final core = PublicCore();
+  await core.open();
+  OpenCoreBinding.attach(core);
+  attachCommunityConversationRoutes();
   runApp(const CommunityPreviewApp());
 }
 
@@ -87,11 +92,23 @@ class _PreviewShellState extends State<PreviewShell> {
   int _currentIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // 测试与嵌入式启动也可能直接挂载壳层，此处确保正式版列表路由始终完成接线。
+    attachCommunityConversationRoutes();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: const [FeaturePage(), DemoProfilePage()],
+        children: const [
+          ConversationListPage(),
+          CommunityAssistantListPage(),
+          FeaturePage(routes: FeaturePageRoutes()),
+          DemoProfilePage(),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -100,17 +117,60 @@ class _PreviewShellState extends State<PreviewShell> {
         backgroundColor: AsOneTheme.pageBg,
         selectedItemColor: AsOneTheme.accentFor('default'),
         unselectedItemColor: AsOneTheme.tabInactive,
-        items: const [
+        selectedFontSize: 11,
+        unselectedFontSize: 11,
+        items: [
           BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard_outlined),
+            icon: _NavigationAssetIcon(
+              path: _currentIndex == 0
+                  ? 'assets/navigation/conversation_selected.png'
+                  : 'assets/navigation/conversation_unselected.png',
+            ),
+            label: '对话',
+          ),
+          BottomNavigationBarItem(
+            icon: _NavigationAssetIcon(
+              path: _currentIndex == 1
+                  ? 'assets/navigation/assistant_selected.png'
+                  : 'assets/navigation/assistant_unselected.png',
+            ),
+            label: '助手',
+          ),
+          BottomNavigationBarItem(
+            icon: _NavigationAssetIcon(
+              path: _currentIndex == 2
+                  ? 'assets/navigation/feature_selected.png'
+                  : 'assets/navigation/feature_unselected.png',
+            ),
             label: '功能',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
+            icon: _NavigationAssetIcon(
+              path: _currentIndex == 3
+                  ? 'assets/navigation/profile_selected.png'
+                  : 'assets/navigation/profile_unselected.png',
+            ),
             label: '我的',
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NavigationAssetIcon extends StatelessWidget {
+  const _NavigationAssetIcon({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      path,
+      width: 26,
+      height: 26,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
     );
   }
 }

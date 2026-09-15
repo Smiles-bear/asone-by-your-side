@@ -6,6 +6,7 @@ import '../theme/asone_theme.dart';
 import '../widgets/mind_source_identity.dart';
 import '../widgets/asone_app_bar.dart';
 import '../widgets/asone_dialog.dart';
+import '../widgets/asone_date_picker.dart';
 import '../widgets/asone_feedback.dart';
 import '../widgets/asone_icons.dart';
 
@@ -149,12 +150,12 @@ class _StickyNoteEditorPageState extends State<StickyNoteEditorPage> {
   });
 
   Future<void> _pickExpiry() async {
-    final selected = await showDatePicker(
+    final selected = await showAsOneDatePicker(
       context: context,
       initialDate: _expiresAt ?? DateTime.now().add(const Duration(days: 1)),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 3650)),
-      helpText: '选择有效日期',
+      title: '选择有效日期',
     );
     if (selected == null) return;
     setState(() {
@@ -243,7 +244,7 @@ class _StickyNoteEditorPageState extends State<StickyNoteEditorPage> {
               child: const Text('取消'),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AsOneTheme.danger),
+              style: AsOneTheme.dangerConfirmStyle(),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('删除'),
             ),

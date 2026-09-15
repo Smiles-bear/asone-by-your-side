@@ -4,6 +4,7 @@ import 'capability_detection_api.dart';
 import 'conversation_repository_api.dart';
 import 'feature_unread_api.dart';
 import 'message_board_repository_api.dart';
+import 'message_repository_api.dart';
 import 'model_discovery_api.dart';
 import 'model_service_repository_api.dart';
 import 'sticky_note_repository_api.dart';
@@ -17,6 +18,8 @@ abstract interface class OpenCore {
   AssistantRepositoryApi get assistants;
 
   ConversationRepositoryApi get conversations;
+
+  MessageRepositoryApi get messages;
 
   ModelServiceRepositoryApi get modelServices;
 
