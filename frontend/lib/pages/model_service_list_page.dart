@@ -39,6 +39,7 @@ class _ModelServiceListPageState extends State<ModelServiceListPage> {
   List<ModelService> _services = [];
   bool _loading = true;
   Map<String, List<Map<String, Object?>>> _capabilityCache = {};
+  Set<String> _capabilityLoadFailures = {};
   String? _retestingServiceId;
 
   @override
@@ -67,10 +68,21 @@ class _ModelServiceListPageState extends State<ModelServiceListPage> {
   /// 仅加载与当前地址、Key、模型指纹一致的真实测试结果。
   Future<void> _loadCapabilities(List<ModelService> services) async {
     final cache = <String, List<Map<String, Object?>>>{};
+    final failures = <String>{};
     for (final service in services) {
-      cache[service.id] = await _api.getModelCapabilityTests(service.id);
+      try {
+        cache[service.id] = await _api.getModelCapabilityTests(service.id);
+      } catch (error) {
+        failures.add(service.id);
+        DebugLogger.instance.error(
+          '加载模型能力失败',
+          tag: 'ModelConfiguration',
+          details: 'stage=capability_load type=${error.runtimeType}',
+        );
+      }
     }
     _capabilityCache = cache;
+    _capabilityLoadFailures = failures;
   }
 
   Future<void> _addService() async {
@@ -211,9 +223,12 @@ class _ModelServiceListPageState extends State<ModelServiceListPage> {
   ];
 
   Widget _buildCapabilityBadges(String serviceId) {
+    if (_capabilityLoadFailures.contains(serviceId)) {
+      return const Text('能力加载失败，请重新打开配置', style: AsOneTheme.captionStyle);
+    }
     final results = _capabilityCache[serviceId] ?? const [];
     if (results.isEmpty) {
-      return const Text('检测失败，点击重新检测', style: AsOneTheme.captionStyle);
+      return const Text('尚无检测结果，请重新检测', style: AsOneTheme.captionStyle);
     }
     final supported = results
         .where((item) => item['verdict'] == 'supported')

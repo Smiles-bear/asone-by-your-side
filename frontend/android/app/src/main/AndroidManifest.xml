@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="如一伴你行"
+        android:label="Azruiyoi 社区版"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

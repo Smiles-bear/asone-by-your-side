@@ -31,6 +31,19 @@ class ModelServiceNewPage extends StatefulWidget {
   State<ModelServiceNewPage> createState() => _ModelServiceNewPageState();
 }
 
+extension on _ModelServiceNewPageState {
+  bool get _canScan =>
+      _apiKeyController.text.trim().isNotEmpty &&
+      (_isOfficial || _baseUrlController.text.trim().isNotEmpty);
+
+  String? get _selectedModelId {
+    final value = _modelNameController.text.trim();
+    return _discoveredModels.any((model) => model['id'] == value)
+        ? value
+        : null;
+  }
+}
+
 class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
   late final ModelDiscoveryApi _api =
       widget.discovery ?? OpenCoreBinding.instance.modelDiscovery;
@@ -235,6 +248,7 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
                 children: [
                   TextFormField(
                     controller: _baseUrlController,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       labelText: 'API 地址',
                       hintText: _isOfficial
@@ -251,6 +265,7 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _apiKeyController,
+                    onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
                       labelText: 'API Key',
                       hintText: 'sk-...',
@@ -277,23 +292,47 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
                       hintText: '可选择或手动填写',
                     ),
                   ),
+                  if (_discoveredModels.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedModelId,
+                      decoration: const InputDecoration(
+                        labelText: '从接口返回的模型中选择',
+                      ),
+                      hint: const Text('请选择已发现的模型'),
+                      items: [
+                        for (final model in _discoveredModels)
+                          DropdownMenuItem<String>(
+                            value: model['id'] as String,
+                            child: Text(model['id'] as String),
+                          ),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        final model = _discoveredModels.firstWhere(
+                          (item) => item['id'] == value,
+                        );
+                        _selectModelFromList(value, model);
+                      },
+                    ),
+                  ],
                 ],
               ),
             ),
             const SizedBox(height: 22),
             AsOneButton(
-              label: '检测能力',
-              icon: AsOneIconName.test,
-              onPressed: canDetect ? _detectCapabilities : null,
+              label: _discovering ? '检测中…' : '检测模型',
+              icon: AsOneIconName.search,
+              loading: _discovering,
+              onPressed: _discovering || !_canScan ? null : _scanModels,
+              tone: AsOneButtonTone.secondary,
               expand: true,
             ),
             const SizedBox(height: 12),
             AsOneButton(
-              label: _discovering ? '扫描中…' : '扫描可用模型',
-              icon: AsOneIconName.search,
-              loading: _discovering,
-              onPressed: _discovering ? null : _scanModels,
-              tone: AsOneButtonTone.secondary,
+              label: '检测能力',
+              icon: AsOneIconName.test,
+              onPressed: canDetect ? _detectCapabilities : null,
               expand: true,
             ),
 

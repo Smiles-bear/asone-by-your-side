@@ -11,6 +11,7 @@ import 'package:asone_contracts/asone_contracts.dart'
         ProtocolType;
 import 'package:flutter/material.dart';
 
+import '../services/debug_logger.dart';
 import '../services/model_endpoint.dart';
 import '../services/provider_definition.dart';
 import '../services/provider_registry.dart';
@@ -69,7 +70,11 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
   bool get _isEditing => widget.service != null;
 
   bool get _hasUnsavedModelChange =>
-      _isEditing && _selectedModel != _persistedModel;
+      _isEditing &&
+      (_selectedModel != _persistedModel ||
+          _baseUrlController.text.trim() != widget.service!.baseUrl.trim() ||
+          _apiKeyController.text.trim() != widget.service!.apiKey.trim() ||
+          _selectedProtocol != widget.service!.protocolType);
 
   ProviderDefinition? get _selectedProvider => _selectedProviderId == null
       ? null
@@ -97,14 +102,23 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
   }
 
   Future<void> _loadCapabilityVerdicts(String serviceId) async {
-    final results = await _modelServices.getModelCapabilityTests(serviceId);
-    if (!mounted) return;
-    setState(() {
-      _capabilityVerdicts = {
-        for (final result in results)
-          result['capability'] as String: result['verdict'] as String,
-      };
-    });
+    try {
+      final results = await _modelServices.getModelCapabilityTests(serviceId);
+      if (!mounted) return;
+      setState(() {
+        _capabilityVerdicts = {
+          for (final result in results)
+            result['capability'] as String: result['verdict'] as String,
+        };
+      });
+    } catch (error) {
+      DebugLogger.instance.error(
+        '读取模型能力失败',
+        tag: 'ModelConfiguration',
+        details: 'stage=form_capability_load type=${error.runtimeType}',
+      );
+      if (mounted) _toast('能力结果加载失败，可重新检测');
+    }
   }
 
   @override
@@ -546,11 +560,50 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
               if (!_isOfficialProvider) ...[
                 TextFormField(
                   controller: _modelNameController,
+                  onChanged: (value) {
+                    if (value.trim() != _selectedModel) {
+                      setState(
+                        () => _selectedModel = value.trim().isEmpty
+                            ? null
+                            : value.trim(),
+                      );
+                    }
+                  },
                   decoration: const InputDecoration(
                     labelText: '模型名称（可选）',
                     hintText: '可手动填写，不影响扫描模型列表',
                     border: OutlineInputBorder(),
                   ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (_discoveredModels.isNotEmpty) ...[
+                DropdownButtonFormField<String>(
+                  initialValue:
+                      _discoveredModels.any(
+                        (model) => model['id'] == _selectedModel,
+                      )
+                      ? _selectedModel
+                      : null,
+                  decoration: const InputDecoration(
+                    labelText: '从接口返回的模型中选择',
+                    border: OutlineInputBorder(),
+                  ),
+                  hint: const Text('请选择已发现的模型'),
+                  items: [
+                    for (final model in _discoveredModels)
+                      DropdownMenuItem<String>(
+                        value: model['id'] as String,
+                        child: Text(model['id'] as String),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    final model = _discoveredModels.firstWhere(
+                      (item) => item['id'] == value,
+                    );
+                    _selectModel(value, model);
+                  },
                 ),
                 const SizedBox(height: 16),
               ],
