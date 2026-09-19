@@ -36,6 +36,7 @@ void main() {
   });
 
   test('Conversation JSON round trip preserves nullable activity fields', () {
+    final pinnedAt = updatedAt.add(const Duration(minutes: 1));
     final conversation = Conversation(
       id: 'conversation-1',
       title: '测试对话',
@@ -44,6 +45,7 @@ void main() {
       status: 'active',
       createdAt: createdAt,
       updatedAt: updatedAt,
+      pinnedAt: pinnedAt,
       lastMessage: '最后一条消息',
       lastMessageAt: updatedAt,
       draftText: '草稿',
@@ -56,6 +58,8 @@ void main() {
     final restored = Conversation.fromJson(conversation.toJson());
     expect(restored.toJson(), conversation.toJson());
     expect(restored.hasDraft, isTrue);
+    expect(restored.isPinned, isTrue);
+    expect(restored.pinnedAt, pinnedAt);
     expect(restored.listActivityAt, updatedAt);
   });
 

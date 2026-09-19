@@ -61,6 +61,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
   Future<void>? _conversationLoadFuture;
   Timer? _groupLoadTimeoutTimer;
   bool _conversationLoadPending = false;
+  String? _deletingConversationId;
+  final Set<String> _locallyDeletedConversationIds = {};
 
   @override
   void initState() {
@@ -200,9 +202,12 @@ class _ConversationListPageState extends State<ConversationListPage> {
         const Duration(seconds: 12),
       );
       if (!mounted) return;
+      final visible = list
+          .where((item) => !_locallyDeletedConversationIds.contains(item.id))
+          .toList(growable: false);
       setState(() {
-        _conversations = list;
-        _filteredConversations = list;
+        _conversations = visible;
+        _filteredConversations = visible;
         _loading = false;
         _loadError = null;
       });
@@ -377,47 +382,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
     }
   }
 
-  Future<void> _renameConversation(Conversation conv) async {
-    final controller = TextEditingController(text: conv.title);
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AsOneDialog(
-        icon: asOneIconData(AsOneIconName.edit),
-        title: '重命名对话',
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            labelText: '新标题',
-            border: OutlineInputBorder(),
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          AsOneButton(
-            label: '取消',
-            tone: AsOneButtonTone.secondary,
-            onPressed: () => Navigator.pop(context),
-          ),
-          AsOneButton(
-            label: '确定',
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-          ),
-        ],
-      ),
-    );
-
-    if (result == null || result.isEmpty || result == conv.title) return;
-
-    try {
-      await _dataSource.updateConversation(conv.id, title: result);
-      await _loadConversations();
-    } catch (e) {
-      if (!mounted) return;
-      _toast(_friendlyOperationError(e, '暂时无法重命名，请稍后重试'));
-    }
-  }
-
   Future<void> _deleteConversation(Conversation conv) async {
+    if (_deletingConversationId != null) return;
+    _deletingConversationId = conv.id;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AsOneDialog(
@@ -440,30 +407,56 @@ class _ConversationListPageState extends State<ConversationListPage> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      _deletingConversationId = null;
+      return;
+    }
 
     try {
       await _dataSource.deleteConversation(conv.id);
-      await _loadConversations();
       if (!mounted) return;
-      _toast('对话已删除');
+      setState(() {
+        _locallyDeletedConversationIds.add(conv.id);
+        _conversations.removeWhere((item) => item.id == conv.id);
+        _filteredConversations.removeWhere((item) => item.id == conv.id);
+      });
+      _toast('已删除');
+      unawaited(_loadConversations());
     } catch (e) {
       if (!mounted) return;
       _toast(_friendlyOperationError(e, '暂时无法删除对话，请稍后重试'));
+    } finally {
+      _deletingConversationId = null;
+    }
+  }
+
+  Future<void> _toggleConversationPinned(Conversation conv) async {
+    try {
+      await _dataSource.setConversationPinned(conv.id, pinned: !conv.isPinned);
+      await _loadConversations();
+    } catch (e) {
+      if (!mounted) return;
+      _toast(
+        _friendlyOperationError(
+          e,
+          conv.isPinned ? '暂时无法取消置顶，请稍后重试' : '暂时无法置顶，请稍后重试',
+        ),
+      );
     }
   }
 
   Future<void> _showConversationMenu(Conversation conv) async {
+    if (_deletingConversationId != null) return;
     final action = await AsOneBottomSheet.showActions<String>(
       context,
-      title: conv.title,
-      actions: const [
+      title: _buildTitle(conv),
+      actions: [
         AsOneSheetAction(
-          value: 'rename',
-          label: '重命名',
-          icon: AsOneIconName.edit,
+          value: 'pin',
+          label: conv.isPinned ? '取消置顶' : '置顶',
+          icon: AsOneIconName.pin,
         ),
-        AsOneSheetAction(
+        const AsOneSheetAction(
           value: 'delete',
           label: '删除',
           icon: AsOneIconName.delete,
@@ -472,8 +465,8 @@ class _ConversationListPageState extends State<ConversationListPage> {
       ],
     );
     if (!mounted) return;
-    if (action == 'rename') {
-      await _renameConversation(conv);
+    if (action == 'pin') {
+      await _toggleConversationPinned(conv);
     } else if (action == 'delete') {
       await _deleteConversation(conv);
     }
@@ -539,7 +532,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     if (days == 0) {
       final hour = time.hour.toString().padLeft(2, '0');
       final minute = time.minute.toString().padLeft(2, '0');
-      return hour + ':' + minute;
+      return '$hour:$minute';
     }
     if (days == 1) return '\u6628\u5929';
     if (days > 1 && days < 7) {
@@ -555,13 +548,9 @@ class _ConversationListPageState extends State<ConversationListPage> {
       return weekdays[time.weekday - 1];
     }
     if (time.year == now.year) {
-      return time.month.toString() + '\u6708' + time.day.toString() + '\u65e5';
+      return '${time.month}\u6708${time.day}\u65e5';
     }
-    return time.year.toString() +
-        '/' +
-        time.month.toString() +
-        '/' +
-        time.day.toString();
+    return '${time.year}/${time.month}/${time.day}';
   }
 
   Future<void> _showAddMenu() async {
@@ -610,6 +599,10 @@ class _ConversationListPageState extends State<ConversationListPage> {
   Widget build(BuildContext context) {
     final entries = <Object>[..._filteredConversations, ..._filteredGroups]
       ..sort((a, b) {
+        final pinnedOrder = (b is Conversation && b.isPinned ? 1 : 0).compareTo(
+          a is Conversation && a.isPinned ? 1 : 0,
+        );
+        if (pinnedOrder != 0) return pinnedOrder;
         final aTime = a is Conversation
             ? a.listActivityAt
             : (a as GroupRoom).updatedAt;
@@ -710,11 +703,11 @@ class _ConversationListPageState extends State<ConversationListPage> {
               child: ListView.separated(
                 padding: EdgeInsets.zero,
                 itemCount: entries.length,
-                separatorBuilder: (_, index) => Divider(
+                separatorBuilder: (_, index) => const Divider(
                   height: 0.5,
                   thickness: 0.5,
                   indent: 76,
-                  color: const Color(0x80D9D9D9),
+                  color: Color(0x80D9D9D9),
                 ),
                 itemBuilder: (context, index) {
                   final entry = entries[index];

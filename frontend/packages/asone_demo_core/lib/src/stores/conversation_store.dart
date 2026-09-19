@@ -19,7 +19,15 @@ class DemoConversationStore implements ConversationRepositoryApi {
   @override
   Future<List<Conversation>> getConversations() async {
     final list = _rows.map(Conversation.fromJson).toList();
-    list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    list.sort((a, b) {
+      final pinnedOrder = (b.isPinned ? 1 : 0).compareTo(a.isPinned ? 1 : 0);
+      if (pinnedOrder != 0) return pinnedOrder;
+      final pinnedAtOrder = (b.pinnedAt ?? DateTime(0)).compareTo(
+        a.pinnedAt ?? DateTime(0),
+      );
+      if (pinnedAtOrder != 0) return pinnedAtOrder;
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
     return list;
   }
 
@@ -80,6 +88,17 @@ class DemoConversationStore implements ConversationRepositoryApi {
     if (title != null) row['title'] = title;
     if (assistantId != null) row['assistant_id'] = assistantId;
     row['updated_at'] = demoNowIso();
+    return Conversation.fromJson(row);
+  }
+
+  @override
+  Future<Conversation> setConversationPinned(
+    String id, {
+    required bool pinned,
+  }) async {
+    final row = _rowById(id);
+    if (row == null) throw StateError('对话不存在');
+    row['pinned_at'] = pinned ? demoNowIso() : null;
     return Conversation.fromJson(row);
   }
 

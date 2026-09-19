@@ -53,11 +53,12 @@ class _CommunityChatSearchPageState extends State<CommunityChatSearchPage> {
     final query = _controller.text.trim();
     _debounce = Timer(const Duration(milliseconds: 260), () {
       if (query.isEmpty) {
-        if (mounted)
+        if (mounted) {
           setState(() {
             _query = '';
             _results = const [];
           });
+        }
         return;
       }
       unawaited(_search(query));
@@ -107,8 +108,9 @@ class _CommunityChatSearchPageState extends State<CommunityChatSearchPage> {
         spans.add(TextSpan(text: text.substring(cursor)));
         break;
       }
-      if (start > cursor)
+      if (start > cursor) {
         spans.add(TextSpan(text: text.substring(cursor, start)));
+      }
       spans.add(
         TextSpan(
           text: text.substring(start, start + query.length),

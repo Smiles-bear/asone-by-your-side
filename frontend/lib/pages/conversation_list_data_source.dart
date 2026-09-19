@@ -22,6 +22,8 @@ abstract interface class ConversationListDataSource {
     String? assistantId,
   });
 
+  Future<Conversation> setConversationPinned(String id, {required bool pinned});
+
   Future<void> deleteConversation(String id);
 }
 
@@ -68,6 +70,12 @@ class OpenCoreConversationListDataSource implements ConversationListDataSource {
     title: title,
     assistantId: assistantId,
   );
+
+  @override
+  Future<Conversation> setConversationPinned(
+    String id, {
+    required bool pinned,
+  }) => _conversations.setConversationPinned(id, pinned: pinned);
 
   @override
   Future<void> deleteConversation(String id) =>

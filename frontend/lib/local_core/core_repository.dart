@@ -924,7 +924,7 @@ class CoreRepository
         ), 0) AS unread_count
       FROM conversations c
       WHERE c.import_pending = 0
-      ORDER BY COALESCE(
+      ORDER BY (c.pinned_at IS NOT NULL) DESC, c.pinned_at DESC, COALESCE(
         CASE WHEN TRIM(c.draft_text) != '' THEN c.draft_updated_at END,
         last_message_at,
         c.updated_at
@@ -1103,6 +1103,28 @@ class CoreRepository
       'conversations',
       where: 'id = ?',
       whereArgs: [id],
+    );
+    return Conversation.fromJson(rows.single);
+  }
+
+  @override
+  Future<Conversation> setConversationPinned(
+    String id, {
+    required bool pinned,
+  }) async {
+    final database = await _coreDatabase.open();
+    final count = await database.update(
+      'conversations',
+      {'pinned_at': pinned ? _now() : null},
+      where: 'id = ? AND import_pending = 0',
+      whereArgs: [id],
+    );
+    if (count != 1) throw StateError('对话不存在');
+    final rows = await database.query(
+      'conversations',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
     );
     return Conversation.fromJson(rows.single);
   }

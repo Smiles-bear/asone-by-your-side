@@ -23,5 +23,7 @@ abstract interface class ConversationRepositoryApi {
     String? assistantId,
   });
 
+  Future<Conversation> setConversationPinned(String id, {required bool pinned});
+
   Future<void> deleteConversation(String id);
 }

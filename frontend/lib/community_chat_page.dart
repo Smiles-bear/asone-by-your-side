@@ -43,7 +43,6 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
   final _scrollController = ScrollController();
   final _attachmentMenuKey = GlobalKey();
   final _chatMoreMenuKey = GlobalKey();
-  List<ModelService> _services = const [];
   List<MessageContract> _messages = const [];
   ModelService? _service;
   Assistant? _assistant;
@@ -56,15 +55,6 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
   CancelToken? _cancelToken;
   Timer? _draftTimer;
   bool _draftLoaded = false;
-
-  List<ModelService> get _chatServices => _services
-      .where((service) {
-        final endpoint = service.baseUrl.trim();
-        return endpoint.isNotEmpty &&
-            !endpoint.contains('example.invalid') &&
-            service.model.trim().isNotEmpty;
-      })
-      .toList(growable: false);
 
   @override
   void initState() {
@@ -110,15 +100,16 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
         await core.conversations.markConversationRead(conversation.id);
       }
       if (!mounted) return;
-      final usableService = service != null &&
-          services.any((item) => item.id == service!.id) &&
-          service!.baseUrl.trim().isNotEmpty &&
-          !service!.baseUrl.contains('example.invalid') &&
-          service!.model.trim().isNotEmpty;
+      final selectedService = service;
+      final usableService =
+          selectedService != null &&
+          services.any((item) => item.id == selectedService.id) &&
+          selectedService.baseUrl.trim().isNotEmpty &&
+          !selectedService.baseUrl.contains('example.invalid') &&
+          selectedService.model.trim().isNotEmpty;
       setState(() {
-        _services = services;
         _assistant = assistant;
-        _service = usableService ? service : null;
+        _service = usableService ? selectedService : null;
         _conversation = conversation;
         _messages = messages;
         _loading = false;
@@ -938,10 +929,11 @@ class _CommunityChatMessageContent extends StatelessWidget {
       cursor = match.end;
     }
     final after = content.substring(cursor).trimLeft();
-    if (after.isNotEmpty)
+    if (after.isNotEmpty) {
       children.add(
         MarkdownBody(data: after, styleSheet: style, softLineBreak: isUser),
       );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: children,

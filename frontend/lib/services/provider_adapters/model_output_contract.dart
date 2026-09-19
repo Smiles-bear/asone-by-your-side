@@ -266,7 +266,10 @@ List<Map<String, Object?>> messagesForStructuredTransport(
   required ModelOutputContract contract,
   required StructuredOutputTransport transport,
 }) {
-  if (transport != StructuredOutputTransport.promptJson) return messages;
+  if (transport != StructuredOutputTransport.promptJson &&
+      transport != StructuredOutputTransport.jsonObject) {
+    return messages;
+  }
   final instruction =
       '只输出一个完整 JSON 值，不要使用 Markdown 围栏或附加说明。'
       '结果必须满足以下 JSON Schema：${jsonEncode(contract.schema)}';

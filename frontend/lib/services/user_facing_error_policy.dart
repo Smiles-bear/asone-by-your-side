@@ -13,6 +13,9 @@ class UserFacingErrorPolicy {
   }) {
     if (hasPartialContent) return streamingInterrupted;
     final text = error?.toString().toLowerCase() ?? '';
+    if (text.contains('vision_route_unavailable')) {
+      return '请在模型设置中配置可用的图片理解模型后重试。';
+    }
     if (text.contains('pdf')) {
       return text.contains('没有可读取的文字')
           ? '这个 PDF 没有可读取的文字，请换用文字版 PDF。'
@@ -42,6 +45,31 @@ class UserFacingErrorPolicy {
     }
     if (_containsAny(text, const ['content policy', 'safety'])) {
       return '请检查消息内容后重试。';
+    }
+    if (_containsAny(text, const [
+      'database is locked',
+      'database is busy',
+      'sqlite_busy',
+      'sqlite_locked',
+    ])) {
+      return '本地数据正在处理中，请稍后重试。';
+    }
+    if (_containsAny(text, const [
+      'socketexception',
+      'connection timeout',
+      'receive timeout',
+      'network error',
+      'failed host lookup',
+    ])) {
+      return '网络连接异常，请稍后重试。';
+    }
+    if (_containsAny(text, const [
+      'formatexception',
+      'protocol error',
+      'invalid response',
+      'empty response',
+    ])) {
+      return '模型返回异常，请检查模型配置后重试。';
     }
     if (_containsAny(text, const ['tool', '工具'])) {
       return '请检查工具配置后重试。';

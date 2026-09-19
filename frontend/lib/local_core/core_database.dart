@@ -11,6 +11,7 @@ part 'core_database_v96.dart';
 part 'core_database_v97.dart';
 part 'core_database_v98.dart';
 part 'core_database_v99.dart';
+part 'core_database_v100.dart';
 
 typedef AppSupportDirectoryProvider = Future<Directory> Function();
 
@@ -33,7 +34,7 @@ class CoreDatabase {
     supportDirectoryProvider: supportDirectoryProvider,
   );
 
-  static const schemaVersion = 99;
+  static const schemaVersion = 100;
   static const databaseFileName = 'asone.db';
 
   final DatabaseFactory? _databaseFactory;
@@ -236,6 +237,9 @@ class CoreDatabase {
     if (oldVersion < 97) await _migrateCoreDatabaseToVersion97(this, database);
     if (oldVersion < 98) await _migrateCoreDatabaseToVersion98(this, database);
     if (oldVersion < 99) await _migrateCoreDatabaseToVersion99(this, database);
+    if (oldVersion < 100) {
+      await _migrateCoreDatabaseToVersion100(this, database);
+    }
     for (var version = oldVersion + 1; version <= newVersion; version++) {
       await database.insert('schema_migrations', {
         'version': version,
@@ -287,6 +291,7 @@ class CoreDatabase {
         status TEXT NOT NULL DEFAULT 'active',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        pinned_at TEXT,
         import_pending INTEGER NOT NULL DEFAULT 0,
         draft_text TEXT NOT NULL DEFAULT '',
         draft_updated_at TEXT,

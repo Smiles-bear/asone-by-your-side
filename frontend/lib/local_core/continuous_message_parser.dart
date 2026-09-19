@@ -41,6 +41,8 @@ class SegmentBoundaryEvent extends ParserEvent {
 class ContinuousMessageParser {
   ContinuousMessageParser();
 
+  static const int maxSegments = 6;
+
   /// 当前积累的文本（等待确认是否产生 boundary）
   final StringBuffer _buffer = StringBuffer();
 
@@ -80,6 +82,14 @@ class ContinuousMessageParser {
 
     for (int i = 0; i < delta.length; i++) {
       final char = delta[i];
+
+      if (_boundaryCount >= maxSegments - 1) {
+        _buffer.write(char);
+        events.add(TextAppendEvent(char));
+        _accumulatedText.write(char);
+        _awaitingNextSegment = false;
+        continue;
+      }
 
       if (_awaitingNextSegment) {
         // 已经看到句末，等待确认下一 segment 是否开始
@@ -121,7 +131,7 @@ class ContinuousMessageParser {
         _accumulatedText.write(char);
 
         // 检查是否是句末标点
-        if (_isSentenceEnder(char)) {
+        if (_isSentenceEnder(char) && _boundaryCount < maxSegments - 1) {
           _awaitingNextSegment = true;
         }
       }

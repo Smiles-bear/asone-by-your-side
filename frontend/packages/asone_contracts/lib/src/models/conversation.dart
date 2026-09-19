@@ -7,6 +7,7 @@ class Conversation {
   final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final DateTime? pinnedAt;
   final String? lastMessage;
   final DateTime? lastMessageAt;
   final String draftText;
@@ -23,6 +24,7 @@ class Conversation {
     this.status = 'active',
     required this.createdAt,
     required this.updatedAt,
+    this.pinnedAt,
     this.lastMessage,
     this.lastMessageAt,
     this.draftText = '',
@@ -33,6 +35,7 @@ class Conversation {
   });
 
   bool get hasDraft => draftText.trim().isNotEmpty;
+  bool get isPinned => pinnedAt != null;
 
   DateTime? get listActivityAt => hasDraft ? draftUpdatedAt : lastMessageAt;
 
@@ -40,6 +43,8 @@ class Conversation {
     int? unreadCount,
     String? chatBackgroundMode,
     String? chatBackgroundPath,
+    DateTime? pinnedAt,
+    bool clearPinnedAt = false,
   }) => Conversation(
     id: id,
     title: title,
@@ -48,6 +53,7 @@ class Conversation {
     status: status,
     createdAt: createdAt,
     updatedAt: updatedAt,
+    pinnedAt: clearPinnedAt ? null : pinnedAt ?? this.pinnedAt,
     lastMessage: lastMessage,
     lastMessageAt: lastMessageAt,
     draftText: draftText,
@@ -65,6 +71,9 @@ class Conversation {
     status: json['status'] as String? ?? 'active',
     createdAt: DateTime.parse(json['created_at'] as String),
     updatedAt: DateTime.parse(json['updated_at'] as String),
+    pinnedAt: json['pinned_at'] == null
+        ? null
+        : DateTime.tryParse(json['pinned_at'].toString()),
     lastMessage: json['last_message'] as String?,
     lastMessageAt: json['last_message_at'] == null
         ? null
@@ -90,6 +99,7 @@ class Conversation {
     'status': status,
     'created_at': createdAt.toIso8601String(),
     'updated_at': updatedAt.toIso8601String(),
+    'pinned_at': pinnedAt?.toIso8601String(),
     'last_message': lastMessage,
     'last_message_at': lastMessageAt?.toIso8601String(),
     'draft_text': draftText,
