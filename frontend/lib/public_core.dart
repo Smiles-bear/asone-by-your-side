@@ -18,6 +18,9 @@ import 'community_group_context_builder.dart';
 import 'community_group_round_engine.dart';
 import 'community_group_service.dart';
 import 'community_diary_service.dart';
+import 'community_calendar_repository.dart';
+import 'community_sticky_note_repository.dart';
+import 'community_message_board_repository.dart';
 
 /// 社区版真实本地核心。
 ///
@@ -26,7 +29,7 @@ import 'community_diary_service.dart';
 class PublicCore implements OpenCore {
   PublicCore({CoreDatabase? database, DemoCore? fallback, Dio? chatDio})
     : database = database ?? CoreDatabase.instance,
-      _fallback = fallback ?? DemoCore.withDemoSeed() {
+      compatibilityFallback = fallback {
     repository = CoreRepository(coreDatabase: this.database);
     chatContext = CommunityChatContextCompiler(repository: repository);
     chat = LocalChatService(
@@ -66,14 +69,22 @@ class PublicCore implements OpenCore {
       modelServices: repository,
     );
     featureUnread = FeatureUnreadService(coreDatabase: this.database);
+    _stickyNotes = CommunityStickyNoteRepository(database: this.database);
+    _messageBoard = CommunityMessageBoardRepository(
+      database: this.database,
+      featureUnread: featureUnread,
+    );
     tokenUsage = TokenUsageService(coreDatabase: this.database);
     capabilityDetection = CommunityCapabilityDetection(
       modelServices: repository,
     );
+    _calendar = CommunityCalendarRepository(database: this.database);
   }
 
   final CoreDatabase database;
-  final DemoCore _fallback;
+
+  /// 仅为旧版测试/调用方保留的构造参数；社区功能不再读取演示仓储。
+  final DemoCore? compatibilityFallback;
   late final CoreRepository repository;
   late final CommunityChatContextCompiler chatContext;
   late final LocalChatService chat;
@@ -95,6 +106,9 @@ class PublicCore implements OpenCore {
   @override
   late final CommunityCapabilityDetection capabilityDetection;
   final ModelDiscoveryService _modelDiscovery = ModelDiscoveryService();
+  late final CommunityCalendarRepository _calendar;
+  late final CommunityStickyNoteRepository _stickyNotes;
+  late final CommunityMessageBoardRepository _messageBoard;
 
   Future<void> open() async {
     await database.open();
@@ -125,9 +139,9 @@ class PublicCore implements OpenCore {
   @override
   ModelDiscoveryApi get modelDiscovery => _modelDiscovery;
   @override
-  CalendarRepositoryApi get calendar => _fallback.calendar;
+  CalendarRepositoryApi get calendar => _calendar;
   @override
-  StickyNoteRepositoryApi get stickyNotes => _fallback.stickyNotes;
+  StickyNoteRepositoryApi get stickyNotes => _stickyNotes;
   @override
-  MessageBoardRepositoryApi get messageBoard => _fallback.messageBoard;
+  MessageBoardRepositoryApi get messageBoard => _messageBoard;
 }

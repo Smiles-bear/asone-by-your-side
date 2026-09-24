@@ -101,4 +101,79 @@ void main() {
     expect(history, hasLength(1));
     expect((history.single as Map)['content'], '只保留这条文本');
   });
+
+  test('社区版日历、便签和留言板重开后仍保留用户数据', () async {
+    sqfliteFfiInit();
+    final root = await Directory.systemTemp.createTemp('public-features-');
+    final database = CoreDatabase.forTesting(
+      databaseFactory: databaseFactoryFfi,
+      supportDirectoryProvider: () async => root,
+    );
+    addTearDown(() async {
+      await database.close();
+      await root.delete(recursive: true);
+    });
+
+    final first = PublicCore(database: database);
+    await first.open();
+    final event = await first.calendar.createEvent(
+      input: CalendarEventInput(
+        title: '持久化日历事项',
+        startAt: DateTime(2026, 9, 24, 10),
+      ),
+      authorType: 'user',
+    );
+    final recurring = await first.calendar.createEvent(
+      input: CalendarEventInput(
+        title: '重复日历事项',
+        startAt: DateTime(2026, 9, 24, 10),
+        recurrenceKind: 'daily',
+        recurrenceUntil: DateTime(2026, 9, 26, 10),
+      ),
+      authorType: 'user',
+    );
+    final beforeDelete = await first.calendar.expandOccurrences(
+      eventId: recurring.eventId,
+      rangeStart: DateTime(2026, 9, 24),
+      rangeEnd: DateTime(2026, 9, 27),
+    );
+    expect(beforeDelete, hasLength(3));
+    await first.calendar.deleteOccurrence(
+      eventId: recurring.eventId,
+      occurrenceKey: beforeDelete[1].occurrenceKey,
+    );
+    final note = await first.stickyNotes.createTextNote(
+      content: '持久化便签内容',
+      authorType: 'user',
+    );
+    final post = await first.messageBoard.publishPost(
+      content: '持久化留言内容',
+      authorType: 'user',
+    );
+    await first.messageBoard.publishComment(
+      postId: post.postId,
+      content: '持久化评论内容',
+      authorType: 'user',
+    );
+    await database.close();
+
+    final reopened = PublicCore(database: database);
+    await reopened.open();
+    expect(await reopened.calendar.load(event.eventId), isNotNull);
+    final afterDelete = await reopened.calendar.expandOccurrences(
+      eventId: recurring.eventId,
+      rangeStart: DateTime(2026, 9, 24),
+      rangeEnd: DateTime(2026, 9, 27),
+    );
+    expect(afterDelete, hasLength(2));
+    expect((await reopened.stickyNotes.load(note.noteId))?.content, '持久化便签内容');
+    expect(
+      (await reopened.messageBoard.listPostsForUser()).single.content,
+      '持久化留言内容',
+    );
+    expect(
+      (await reopened.messageBoard.listComments(post.postId)).single.content,
+      '持久化评论内容',
+    );
+  });
 }
