@@ -94,21 +94,32 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
     setState(() {
       _discovering = true;
       _discoveredModels = [];
+      _selectedModelCapabilities = null;
     });
 
     try {
       final List<Map<String, dynamic>> models;
-      if (_isOfficial) {
+      final baseUrl = normalizeModelBaseUrl(_baseUrlController.text);
+      final useOfficialDiscovery =
+          _isOfficial &&
+          widget.provider.hasModelDiscovery &&
+          baseUrl == normalizeModelBaseUrl(widget.provider.baseUrl);
+      if (useOfficialDiscovery) {
         models = await _api.discoverProviderModels(widget.provider.id, apiKey);
+      } else if (
+        _isOfficial &&
+        baseUrl == normalizeModelBaseUrl(widget.provider.baseUrl)
+      ) {
+        // 部分官方服务商没有公开 /models，保留手动填写模型的路径。
+        models = const [];
       } else {
-        final baseUrl = normalizeModelBaseUrl(_baseUrlController.text);
         models = await _api.discoverModelsWithCredentials(
           baseUrl: baseUrl,
           apiKey: apiKey,
-          protocolType: 'auto',
+          protocolType: _isOfficial ? widget.provider.protocol : 'auto',
         );
-        _baseUrlController.text = baseUrl;
       }
+      _baseUrlController.text = baseUrl;
 
       if (!mounted) return;
       setState(() {
@@ -135,7 +146,6 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
     final capabilities = modelData['capabilities'] as Map<String, dynamic>?;
     setState(() {
       _modelNameController.text = modelId;
-      _discoveredModels = [];
       _selectedModelCapabilities = capabilities?.map(
         (k, v) => MapEntry(k, v.toString()),
       );
@@ -166,9 +176,7 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
 
     // 准备配置数据（内存中，不写数据库）
     try {
-      final baseUrl = _isOfficial
-          ? widget.provider.baseUrl
-          : normalizeModelBaseUrl(_baseUrlController.text);
+      final baseUrl = normalizeModelBaseUrl(_baseUrlController.text);
 
       final configData = {
         'name': _isOfficial ? widget.provider.displayName : '自定义',
@@ -286,7 +294,12 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _modelNameController,
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (value) {
+                      if (value.trim() != _selectedModelId) {
+                        _selectedModelCapabilities = null;
+                      }
+                      setState(() {});
+                    },
                     decoration: const InputDecoration(
                       labelText: '模型名称（可选）',
                       hintText: '可选择或手动填写',

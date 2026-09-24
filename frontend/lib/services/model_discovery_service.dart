@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'model_endpoint.dart';
 import 'provider_adapter.dart';
 import 'provider_registry.dart';
+import 'provider_adapters/adapter_helpers.dart';
 import 'provider_adapters/adapter_registry.dart';
 
 /// 模型发现服务：按提供商或凭据发起真实网络探测，返回可用模型列表。
@@ -62,12 +63,15 @@ class ModelDiscoveryService implements ModelDiscoveryApi {
 
     for (final protocol in protocols) {
       final adapter = AdapterRegistry.instance.get(protocol);
-      final endpoints = protocol == ProtocolType.anthropicMessages
-          ? {
-              modelEndpointUri(baseUrl, 'v1/models').toString(),
-              modelEndpointUri(baseUrl, 'models').toString(),
-            }
-          : {modelEndpointUri(baseUrl, 'models').toString()};
+      final endpoints = switch (protocol) {
+        ProtocolType.anthropicMessages => [
+          modelEndpointUri(baseUrl, 'v1/models').toString(),
+          modelEndpointUri(baseUrl, 'models').toString(),
+        ],
+        ProtocolType.openaiChat ||
+        ProtocolType.openaiResponses => endpointVariants(baseUrl, 'models'),
+        _ => [modelEndpointUri(baseUrl, 'models').toString()],
+      }.toSet().toList(growable: false);
       for (final endpoint in endpoints) {
         try {
           final response = await _dio.get<dynamic>(

@@ -148,6 +148,7 @@ class CommunityCapabilityDetection implements CapabilityDetectionApi {
     required List<ModelCapabilityProbeResult> results,
     required String resolvedProtocol,
   }) async {
+    String? createdServiceId;
     try {
       if (!ProtocolType.allProtocols.contains(resolvedProtocol)) return false;
       // 新建模式：首次保存配置。
@@ -162,6 +163,7 @@ class CommunityCapabilityDetection implements CapabilityDetectionApi {
           'protocol_type': resolvedProtocol,
         });
         serviceId = created.id;
+        createdServiceId = created.id;
       }
 
       if (serviceId == null) return false;
@@ -195,6 +197,14 @@ class CommunityCapabilityDetection implements CapabilityDetectionApi {
       );
       return true;
     } catch (_) {
+      final createdId = createdServiceId;
+      if (createdId != null) {
+        try {
+          await _modelServices.deleteModelService(createdId);
+        } catch (_) {
+          // 保存失败后的清理失败不覆盖原始失败结果。
+        }
+      }
       return false;
     }
   }
