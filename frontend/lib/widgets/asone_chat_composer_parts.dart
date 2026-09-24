@@ -56,12 +56,14 @@ class AsOneChatSendButton extends StatelessWidget {
     required this.busy,
     required this.onSend,
     required this.onStop,
+    this.hasPendingAttachments = false,
   });
 
   final TextEditingController controller;
   final bool busy;
   final VoidCallback? onSend;
   final VoidCallback? onStop;
+  final bool hasPendingAttachments;
 
   @override
   Widget build(BuildContext context) =>
@@ -69,7 +71,7 @@ class AsOneChatSendButton extends StatelessWidget {
         valueListenable: controller,
         builder: (context, value, _) {
           final hasText = value.text.trim().isNotEmpty;
-          final showAction = busy || hasText;
+          final showAction = busy || hasText || hasPendingAttachments;
           if (!showAction) return const SizedBox.shrink();
           return Row(
             mainAxisSize: MainAxisSize.min,
@@ -123,6 +125,7 @@ class AsOneChatInputBar extends StatefulWidget {
     required this.busy,
     required this.voiceEnabled,
     required this.attachmentMenuOpen,
+    this.hasPendingAttachments = false,
     required this.onSend,
     required this.onStop,
     required this.onAdd,
@@ -133,12 +136,15 @@ class AsOneChatInputBar extends StatefulWidget {
     required this.onVoiceAmplitude,
     required this.addButtonKey,
     this.header,
+    this.onInputTap,
+    this.reserveBottomInset = true,
   });
 
   final TextEditingController controller;
   final bool busy;
   final bool voiceEnabled;
   final bool attachmentMenuOpen;
+  final bool hasPendingAttachments;
   final VoidCallback onSend;
   final VoidCallback onStop;
   final VoidCallback onAdd;
@@ -149,6 +155,8 @@ class AsOneChatInputBar extends StatefulWidget {
   final Stream<double> Function() onVoiceAmplitude;
   final GlobalKey addButtonKey;
   final Widget? header;
+  final VoidCallback? onInputTap;
+  final bool reserveBottomInset;
 
   @override
   State<AsOneChatInputBar> createState() => _AsOneChatInputBarState();
@@ -191,6 +199,7 @@ class _AsOneChatInputBarState extends State<AsOneChatInputBar> {
   }
 
   void _showKeyboardMode() {
+    widget.onInputTap?.call();
     setState(() {
       _voiceMode = false;
       _recording = false;
@@ -315,6 +324,7 @@ class _AsOneChatInputBarState extends State<AsOneChatInputBar> {
   @override
   Widget build(BuildContext context) => SafeArea(
     top: false,
+    bottom: widget.reserveBottomInset,
     child: ColoredBox(
       color: const Color(0xFFFFF5F2),
       child: Padding(
@@ -325,7 +335,7 @@ class _AsOneChatInputBarState extends State<AsOneChatInputBar> {
             if (widget.header != null) widget.header!,
             Container(
               constraints: const BoxConstraints(minHeight: 51),
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 0),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(15),
@@ -347,15 +357,18 @@ class _AsOneChatInputBarState extends State<AsOneChatInputBar> {
                       behavior: HitTestBehavior.opaque,
                       onTap: widget.busy ? null : widget.onAdd,
                       child: SizedBox(
-                        width: 48,
+                        width: 40,
                         height: 48,
                         child: Center(
-                          child: widget.attachmentMenuOpen
-                              ? const AsOneIcon(
-                                  AsOneIconName.close,
-                                  color: AsOneTheme.iconAccent,
-                                )
-                              : const AsOneIcon(AsOneIconName.add),
+                          child: Transform.translate(
+                            offset: const Offset(4, 0),
+                            child: widget.attachmentMenuOpen
+                                ? const AsOneIcon(
+                                    AsOneIconName.close,
+                                    color: AsOneTheme.iconAccent,
+                                  )
+                                : const AsOneIcon(AsOneIconName.add),
+                          ),
                         ),
                       ),
                     ),
@@ -412,10 +425,13 @@ class _AsOneChatInputBarState extends State<AsOneChatInputBar> {
                       valueListenable: widget.controller,
                       builder: (context, value, _) {
                         final showSend =
-                            widget.busy || value.text.trim().isNotEmpty;
+                            widget.busy ||
+                            widget.hasPendingAttachments ||
+                            value.text.trim().isNotEmpty;
                         if (showSend) {
                           return AsOneChatSendButton(
                             controller: widget.controller,
+                            hasPendingAttachments: widget.hasPendingAttachments,
                             busy: widget.busy,
                             onSend: widget.onSend,
                             onStop: widget.onStop,

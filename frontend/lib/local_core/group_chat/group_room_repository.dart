@@ -91,11 +91,25 @@ class GroupRoomRepository {
 
   Future<List<GroupRoom>> listRooms({bool includeArchived = false}) async {
     final database = await _coreDatabase.open();
-    final rows = await database.query(
-      'group_rooms',
-      where: includeArchived ? "status != 'deleted'" : "status = 'active'",
-      orderBy: 'updated_at DESC',
-    );
+    final rows = await database.rawQuery('''
+      SELECT r.*, m.created_at AS last_message_at,
+        CASE WHEN m.message_id IS NULL THEN NULL ELSE
+          (CASE WHEN m.speaker_type = 'user' THEN '我' ELSE COALESCE(a.name, '助手') END) || '：' ||
+          CASE WHEN TRIM(m.content) != '' THEN SUBSTR(m.content, 1, 300)
+            WHEN EXISTS (SELECT 1 FROM group_message_attachments ga JOIN attachments att ON att.id = ga.attachment_id
+              WHERE ga.message_id = m.message_id AND att.mime_type LIKE 'image/%') THEN '[图片]'
+            WHEN EXISTS (SELECT 1 FROM group_message_attachments ga WHERE ga.message_id = m.message_id) THEN '[附件]'
+            ELSE '[语音]' END END AS last_message_preview
+      FROM group_rooms r
+      LEFT JOIN group_messages m ON m.message_id = (
+        SELECT gm.message_id FROM group_messages gm
+        WHERE gm.room_id = r.room_id AND gm.is_deleted = 0 AND gm.visible = 1
+          AND (gm.speaker_type = 'user' OR gm.answer_status = 'completed')
+        ORDER BY gm.sequence DESC LIMIT 1)
+      LEFT JOIN assistants a ON a.id = m.speaker_assistant_id
+      WHERE ${includeArchived ? "r.status != 'deleted'" : "r.status = 'active'"}
+      ORDER BY COALESCE(m.created_at, r.created_at) DESC
+    ''');
     return rows.map(GroupRoom.fromRow).toList(growable: false);
   }
 
@@ -188,12 +202,16 @@ class GroupRoomRepository {
       {
         'draft_text': draftText,
         'draft_updated_at': draftText.isEmpty ? null : now,
-        'updated_at': now,
       },
-      where: "room_id = ? AND status != 'deleted'",
-      whereArgs: [roomId],
+      where: "room_id = ? AND status != 'deleted' AND draft_text != ?",
+      whereArgs: [roomId, draftText],
     );
-    if (changed != 1) throw StateError('群聊不存在');
+    if (changed == 0) {
+      final room = await getRoom(roomId);
+      if (room == null || room.status == 'deleted') {
+        throw StateError('群聊不存在');
+      }
+    }
   }
 
   Future<void> markRead(String roomId, int sequence) async {

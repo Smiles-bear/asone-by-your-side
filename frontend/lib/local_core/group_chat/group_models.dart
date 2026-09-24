@@ -30,6 +30,8 @@ class GroupRoom {
     required this.nextSequence,
     required this.draftText,
     this.draftUpdatedAt,
+    this.lastMessageAt,
+    this.lastMessagePreview,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -43,6 +45,9 @@ class GroupRoom {
   final int nextSequence;
   final String draftText;
   final DateTime? draftUpdatedAt;
+  final DateTime? lastMessageAt;
+  final String? lastMessagePreview;
+  DateTime get listActivityAt => lastMessageAt ?? createdAt;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -56,6 +61,8 @@ class GroupRoom {
     nextSequence: row['next_sequence']! as int,
     draftText: row['draft_text'] as String? ?? '',
     draftUpdatedAt: _date(row['draft_updated_at']),
+    lastMessageAt: _date(row['last_message_at']),
+    lastMessagePreview: row['last_message_preview'] as String?,
     createdAt: DateTime.parse(row['created_at']! as String),
     updatedAt: DateTime.parse(row['updated_at']! as String),
   );

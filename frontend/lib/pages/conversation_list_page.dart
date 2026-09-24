@@ -605,10 +605,10 @@ class _ConversationListPageState extends State<ConversationListPage> {
         if (pinnedOrder != 0) return pinnedOrder;
         final aTime = a is Conversation
             ? a.listActivityAt
-            : (a as GroupRoom).updatedAt;
+            : (a as GroupRoom).listActivityAt;
         final bTime = b is Conversation
             ? b.listActivityAt
-            : (b as GroupRoom).updatedAt;
+            : (b as GroupRoom).listActivityAt;
         return (bTime ?? DateTime.fromMillisecondsSinceEpoch(0)).compareTo(
           aTime ?? DateTime.fromMillisecondsSinceEpoch(0),
         );
@@ -726,7 +726,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
                           .map((id) => _assistantMap[id])
                           .whereType<Assistant>()
                           .toList(),
-                      time: _formatLastMessageTime(entry.updatedAt),
+                      time: _formatLastMessageTime(entry.listActivityAt),
                       unreadCount: _groupUnreadCounts[entry.roomId] ?? 0,
                       onTap: () async {
                         if (buildGroupPage == null) {
@@ -849,6 +849,8 @@ class _GroupConversationTile extends StatelessWidget {
                         child: Text(
                           room.draftText.isNotEmpty
                               ? '[草稿]${room.draftText}'
+                              : room.lastMessagePreview?.isNotEmpty == true
+                              ? room.lastMessagePreview!
                               : '${assistants.length} 名助手',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,

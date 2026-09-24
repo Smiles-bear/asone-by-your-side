@@ -50,6 +50,8 @@ class ContinuousMessageParser {
   bool _awaitingNextSegment = false;
 
   bool _finished = false;
+  bool _htmlLiteralMode = false;
+  String _recentInput = '';
 
   /// 累积的所有安全正文（用于测试验证）
   final StringBuffer _accumulatedText = StringBuffer();
@@ -82,6 +84,29 @@ class ContinuousMessageParser {
 
     for (int i = 0; i < delta.length; i++) {
       final char = delta[i];
+
+      _recentInput = '$_recentInput$char';
+      if (_recentInput.length > 40) {
+        _recentInput = _recentInput.substring(_recentInput.length - 40);
+      }
+      if (!_htmlLiteralMode &&
+          (RegExp(
+                r'```html[ \t]*\r?\n$',
+                caseSensitive: false,
+              ).hasMatch(_recentInput) ||
+              RegExp(
+                r'(?:<html|<!doctype\s+html)$',
+                caseSensitive: false,
+              ).hasMatch(_recentInput))) {
+        _htmlLiteralMode = true;
+      }
+      if (_htmlLiteralMode) {
+        _buffer.write(char);
+        events.add(TextAppendEvent(char));
+        _accumulatedText.write(char);
+        _awaitingNextSegment = false;
+        continue;
+      }
 
       if (_boundaryCount >= maxSegments - 1) {
         _buffer.write(char);
