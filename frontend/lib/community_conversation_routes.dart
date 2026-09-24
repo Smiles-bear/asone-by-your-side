@@ -7,6 +7,7 @@ import 'services/config_service.dart';
 
 import 'community_chat_page.dart';
 import 'community_group_page.dart';
+import 'community_conversation_search_page.dart';
 import 'public_core.dart';
 
 /// 将正式版会话列表的导航接到社区版公开聊天实现。
@@ -28,6 +29,8 @@ void attachCommunityConversationRoutes() {
           CommunityGroupPage(initialRoomId: roomId);
   ConversationListRoutes.buildGroupCreatePage = ({required assistants}) =>
       const CommunityGroupPage();
+  ConversationListRoutes.buildSearchPage = () =>
+      const CommunityConversationSearchPage();
   ConversationListRoutes.groupDataSource = _CommunityGroupDataSource();
 }
 

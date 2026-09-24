@@ -80,9 +80,6 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
       ? null
       : ProviderRegistry.instance.get(_selectedProviderId!);
 
-  bool get _isOfficialProvider =>
-      _selectedProvider != null && _selectedProvider!.official;
-
   @override
   void initState() {
     super.initState();
@@ -136,6 +133,7 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
       _selectedProviderId = provider.id;
       _selectedModel = null;
       _discoveredModels = [];
+      _capabilityVerdicts = const {};
       if (provider.official) {
         _nameController.text = provider.displayName;
         _baseUrlController.text = provider.baseUrl;
@@ -161,27 +159,38 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
     setState(() => _discovering = true);
     try {
       // 发现阶段只探测，不提前落库。失败或取消不会留下脏配置。
+      final baseUrl = normalizeModelBaseUrl(_baseUrlController.text);
+      final provider = _selectedProvider;
       final List<Map<String, dynamic>> models;
-      if (_isOfficialProvider) {
+      final useOfficialDiscovery =
+          provider != null &&
+          provider.hasModelDiscovery &&
+          provider.baseUrl.trim().isNotEmpty &&
+          baseUrl == normalizeModelBaseUrl(provider.baseUrl);
+      if (useOfficialDiscovery) {
         models = await _discovery.discoverProviderModels(
           _selectedProviderId!,
           apiKey,
         );
+      } else if (provider != null &&
+          provider.baseUrl.trim().isNotEmpty &&
+          baseUrl == normalizeModelBaseUrl(provider.baseUrl)) {
+        // 部分官方服务商没有公开 /models，允许用户直接填写模型名称。
+        models = const [];
       } else {
         final name = _nameController.text.trim();
-        if (name.isEmpty || _baseUrlController.text.trim().isEmpty) {
+        if (name.isEmpty) {
           setState(() => _discovering = false);
           _toast('请先填写名称和 API 地址');
           return;
         }
-        final baseUrl = normalizeModelBaseUrl(_baseUrlController.text);
         models = await _discovery.discoverModelsWithCredentials(
           baseUrl: baseUrl,
           apiKey: apiKey,
-          protocolType: _selectedProtocol,
+          protocolType: provider?.protocol ?? _selectedProtocol,
         );
-        _baseUrlController.text = baseUrl;
       }
+      _baseUrlController.text = baseUrl;
       if (!mounted) return;
 
       setState(() {
@@ -517,25 +526,35 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
                 ),
                 const SizedBox(height: 16),
               ],
-              if (!_isOfficialProvider)
-                TextFormField(
-                  controller: _baseUrlController,
-                  decoration: const InputDecoration(
-                    labelText: 'API 地址',
-                    hintText: 'https://api.openai.com/v1',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.url,
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return '请输入 API 地址';
-                    }
-                    return null;
-                  },
+              TextFormField(
+                controller: _baseUrlController,
+                onChanged: (_) {
+                  if (_capabilityVerdicts.isNotEmpty) {
+                    setState(() => _capabilityVerdicts = const {});
+                  }
+                },
+                decoration: InputDecoration(
+                  labelText: 'API 地址',
+                  hintText:
+                      _selectedProvider?.baseUrl ?? 'https://api.openai.com/v1',
+                  border: const OutlineInputBorder(),
                 ),
-              if (!_isOfficialProvider) const SizedBox(height: 16),
+                keyboardType: TextInputType.url,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '请输入 API 地址';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _apiKeyController,
+                onChanged: (_) {
+                  if (_capabilityVerdicts.isNotEmpty) {
+                    setState(() => _capabilityVerdicts = const {});
+                  }
+                },
                 decoration: InputDecoration(
                   labelText: 'API Key',
                   hintText: 'sk-...',
@@ -557,56 +576,25 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
                 },
               ),
               const SizedBox(height: 16),
-              if (!_isOfficialProvider) ...[
-                TextFormField(
-                  controller: _modelNameController,
-                  onChanged: (value) {
-                    if (value.trim() != _selectedModel) {
-                      setState(
-                        () => _selectedModel = value.trim().isEmpty
-                            ? null
-                            : value.trim(),
-                      );
-                    }
-                  },
-                  decoration: const InputDecoration(
-                    labelText: '模型名称（可选）',
-                    hintText: '可手动填写，不影响扫描模型列表',
-                    border: OutlineInputBorder(),
-                  ),
+              TextFormField(
+                controller: _modelNameController,
+                onChanged: (value) {
+                  if (value.trim() != _selectedModel) {
+                    setState(() {
+                      _selectedModel = value.trim().isEmpty
+                          ? null
+                          : value.trim();
+                      _capabilityVerdicts = const {};
+                    });
+                  }
+                },
+                decoration: const InputDecoration(
+                  labelText: '模型名称（可选）',
+                  hintText: '可手动填写，不影响扫描模型列表',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 16),
-              ],
-              if (_discoveredModels.isNotEmpty) ...[
-                DropdownButtonFormField<String>(
-                  initialValue:
-                      _discoveredModels.any(
-                        (model) => model['id'] == _selectedModel,
-                      )
-                      ? _selectedModel
-                      : null,
-                  decoration: const InputDecoration(
-                    labelText: '从接口返回的模型中选择',
-                    border: OutlineInputBorder(),
-                  ),
-                  hint: const Text('请选择已发现的模型'),
-                  items: [
-                    for (final model in _discoveredModels)
-                      DropdownMenuItem<String>(
-                        value: model['id'] as String,
-                        child: Text(model['id'] as String),
-                      ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    final model = _discoveredModels.firstWhere(
-                      (item) => item['id'] == value,
-                    );
-                    _selectModel(value, model);
-                  },
-                ),
-                const SizedBox(height: 16),
-              ],
+              ),
+              const SizedBox(height: 16),
               AsOneButton(
                 label: _discovering ? '验证中…' : '扫描可用模型',
                 icon: AsOneIconName.search,

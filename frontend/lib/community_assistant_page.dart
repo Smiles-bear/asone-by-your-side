@@ -9,6 +9,7 @@ import 'pages/model_service_list_page.dart';
 import 'package:flutter/material.dart';
 
 import 'community_chat_page.dart';
+import 'community_assistant_form_page.dart';
 
 /// 社区版助手页：沿用正式版列表的视觉结构，只保留本地助手和 API 对话入口。
 class CommunityAssistantListPage extends StatefulWidget {
@@ -57,90 +58,19 @@ class _CommunityAssistantListPageState
         )
         .toList(growable: false);
     if (usableServices.isEmpty) {
+      if (!mounted) return;
       _toast('请先在“我的 > 模型服务”添加可用配置');
       return;
     }
 
-    final draft = await _showAssistantDialog(usableServices);
-    if (!mounted || draft == null) return;
-
-    try {
-      await OpenCoreBinding.instance.assistants
-          .createAssistantWithPrimaryConversation(
-            name: draft.name,
-            primaryModelServiceId: draft.modelServiceId,
-          );
-      await _loadAssistants();
-      _toast('助手已创建，可在对话页开始聊天');
-    } catch (_) {
-      if (mounted) _toast('创建助手失败，请稍后重试');
-    }
-  }
-
-  Future<_AssistantDraft?> _showAssistantDialog(
-    List<ModelService> services,
-  ) async {
-    final nameController = TextEditingController();
-    var selectedServiceId = services.first.id;
-    final result = await showDialog<_AssistantDraft>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('新建助手'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: '助手名称',
-                  hintText: '例如：我的 API 助手',
-                ),
-              ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                initialValue: selectedServiceId,
-                decoration: const InputDecoration(labelText: '模型服务'),
-                items: [
-                  for (final service in services)
-                    DropdownMenuItem(
-                      value: service.id,
-                      child: Text('${service.name} · ${service.model}'),
-                    ),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setDialogState(() => selectedServiceId = value);
-                  }
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final name = nameController.text.trim();
-                if (name.isEmpty) return;
-                Navigator.of(context).pop(
-                  _AssistantDraft(
-                    name: name,
-                    modelServiceId: selectedServiceId,
-                  ),
-                );
-              },
-              child: const Text('创建'),
-            ),
-          ],
-        ),
-      ),
-    );
-    nameController.dispose();
-    return result;
+    if (!mounted) return;
+    final result = await Navigator.of(context)
+        .push<CommunityAssistantFormResult>(
+          MaterialPageRoute(builder: (_) => const CommunityAssistantFormPage()),
+        );
+    if (!mounted || result == null) return;
+    await _loadAssistants();
+    if (result.assistant != null) _toast('助手已创建，可在对话页开始聊天');
   }
 
   Future<void> _openAssistant(Assistant assistant) async {
@@ -162,6 +92,67 @@ class _CommunityAssistantListPageState
       );
     } catch (_) {
       if (mounted) _toast('暂时无法打开助手对话');
+    }
+  }
+
+  Future<void> _manageAssistant(Assistant assistant) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('编辑助手'),
+              onTap: () => Navigator.pop(context, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('删除助手'),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'edit') {
+      final result = await Navigator.of(context)
+          .push<CommunityAssistantFormResult>(
+            MaterialPageRoute(
+              builder: (_) => CommunityAssistantFormPage(assistant: assistant),
+            ),
+          );
+      if (mounted && result != null) await _loadAssistants();
+      return;
+    }
+    if (action == 'delete') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('删除助手？'),
+          content: Text('“${assistant.name}”及其主对话会从本机删除。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('删除'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      try {
+        await OpenCoreBinding.instance.assistants.deleteAssistant(assistant.id);
+        await _loadAssistants();
+        _toast('助手已删除');
+      } catch (_) {
+        _toast('删除失败，请稍后重试');
+      }
     }
   }
 
@@ -236,17 +227,11 @@ class _CommunityAssistantListPageState
                         ? '助'
                         : assistant.name.characters.first,
                     onTap: () => _openAssistant(assistant),
+                    onLongPress: () => _manageAssistant(assistant),
                   );
                 },
               ),
             ),
     );
   }
-}
-
-final class _AssistantDraft {
-  const _AssistantDraft({required this.name, required this.modelServiceId});
-
-  final String name;
-  final String modelServiceId;
 }
