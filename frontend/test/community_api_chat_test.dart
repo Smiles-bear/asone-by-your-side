@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:asone_contracts/asone_contracts.dart';
 import 'package:asone_demo_core/asone_demo_core.dart';
 import 'package:azruiyoi_community/local_core/core_database.dart';
+import 'package:azruiyoi_community/services/provider_adapters/adapter_helpers.dart';
+import 'package:azruiyoi_community/services/provider_adapters/model_protocol_adapter.dart';
+import 'package:azruiyoi_community/services/provider_adapters/openai_chat_adapter.dart';
 import 'package:azruiyoi_community/public_core.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,7 +28,9 @@ class _SseAdapter implements HttpClientAdapter {
     return ResponseBody.fromString(
       body,
       200,
-      headers: {Headers.contentTypeHeader: ['text/event-stream']},
+      headers: {
+        Headers.contentTypeHeader: ['text/event-stream'],
+      },
     );
   }
 
@@ -83,7 +88,41 @@ void main() {
     expect(adapter.request, isA<Map>());
     expect(adapter.request.toString(), contains('你好，API'));
     final messages = await core.messages.getMessages(conversation.id);
-    expect(messages.map((message) => message.content), ['你好，API', '来自 API 的回复']);
+    expect(messages.map((message) => message.content), [
+      '你好，API',
+      '来自 API 的回复',
+    ]);
     expect(messages.last.answerStatus, MessageAnswerStatus.completed);
+  });
+
+  test('社区 API 兼容累计全文流不会重复拼接', () {
+    final adapter = OpenAIChatAdapter();
+    final accumulator = ProviderStreamTextAccumulator();
+    final first = adapter.streamTextChunkFromFrame(
+      const SseFrame(
+        data: {
+          'choices': [
+            {
+              'message': {'content': '第一段'},
+            },
+          ],
+        },
+      ),
+    );
+    final second = adapter.streamTextChunkFromFrame(
+      const SseFrame(
+        data: {
+          'choices': [
+            {
+              'message': {'content': '第一段第二段'},
+            },
+          ],
+        },
+      ),
+    );
+
+    expect(accumulator.add(first), '第一段');
+    expect(accumulator.add(second), '第二段');
+    expect(accumulator.text, '第一段第二段');
   });
 }

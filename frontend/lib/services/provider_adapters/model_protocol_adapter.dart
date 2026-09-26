@@ -67,6 +67,11 @@ abstract class ModelProtocolAdapter {
   /// 从一个 SSE 帧提取文本增量。
   String streamTextFromFrame(SseFrame frame);
 
+  /// 从一个 SSE 帧提取正文，并声明上游返回的是增量还是累计全文。
+  /// 默认协议按增量处理；只有协议字段明确表达累计全文时才应覆写。
+  ProviderStreamTextChunk streamTextChunkFromFrame(SseFrame frame) =>
+      ProviderStreamTextChunk.incremental(streamTextFromFrame(frame));
+
   /// 从一个 SSE 帧提取 reasoning 增量。
   String streamReasoningFromFrame(SseFrame frame) => '';
 
@@ -144,6 +149,44 @@ abstract class ModelProtocolAdapter {
   /// 判断该协议的结构化探针是否通过 forced tool 实现（Anthropic）。
   /// 若是，结构化探针复用工具调用路径。
   bool structuredViaTool() => false;
+}
+
+enum ProviderStreamTextKind { incremental, cumulative }
+
+class ProviderStreamTextChunk {
+  const ProviderStreamTextChunk._(this.text, this.kind);
+
+  const ProviderStreamTextChunk.incremental(String text)
+    : this._(text, ProviderStreamTextKind.incremental);
+
+  const ProviderStreamTextChunk.cumulative(String text)
+    : this._(text, ProviderStreamTextKind.cumulative);
+
+  final String text;
+  final ProviderStreamTextKind kind;
+}
+
+/// 将协议明确标记的累计全文转换为可展示增量，避免重复拼接。
+class ProviderStreamTextAccumulator {
+  String _text = '';
+
+  String get text => _text;
+
+  String add(ProviderStreamTextChunk chunk) {
+    final incoming = chunk.text;
+    if (incoming.isEmpty) return '';
+    if (chunk.kind == ProviderStreamTextKind.incremental) {
+      _text += incoming;
+      return incoming;
+    }
+    if (incoming == _text) return '';
+    if (!incoming.startsWith(_text)) {
+      throw const FormatException('模型流累计正文与已接收内容不一致');
+    }
+    final delta = incoming.substring(_text.length);
+    _text = incoming;
+    return delta;
+  }
 }
 
 /// 用 Dio 执行一次非流式 POST，返回响应体（已尝试 JSON 解析）。

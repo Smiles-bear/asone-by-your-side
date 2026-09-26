@@ -675,10 +675,11 @@ class ProtocolClient {
       final frames = rawResponse.isEmpty
           ? const <SseFrame>[]
           : parseSseLines(const LineSplitter().convert(rawResponse)).toList();
-      final streamedText = frames
-          .map(adapter.streamTextFromFrame)
-          .where((part) => part.isNotEmpty)
-          .join();
+      final textAccumulator = ProviderStreamTextAccumulator();
+      for (final frame in frames) {
+        textAccumulator.add(adapter.streamTextChunkFromFrame(frame));
+      }
+      final streamedText = textAccumulator.text;
       final streamedReasoning = frames
           .map(adapter.streamReasoningFromFrame)
           .where((part) => part.isNotEmpty)
@@ -1017,27 +1018,28 @@ class ProtocolClient {
 
     statusCode = response!.statusCode;
     contentType = _contentType(response);
-    final buffer = StringBuffer();
+    final textAccumulator = ProviderStreamTextAccumulator();
     final reasoningBuffer = StringBuffer();
     try {
       final decoded = await decodeIncrementalSse(
         stream: stream,
         adapter: adapter,
         onFrame: (frame) {
-          final delta = adapter.streamTextFromFrame(frame);
+          final delta = textAccumulator.add(
+            adapter.streamTextChunkFromFrame(frame),
+          );
           final reasoningDelta = adapter.streamReasoningFromFrame(frame);
           if (reasoningDelta.isNotEmpty) {
             reasoningBuffer.write(reasoningDelta);
           }
           if (delta.isNotEmpty) {
-            buffer.write(delta);
             onDelta?.call(delta);
           }
         },
       );
       watch.stop();
       final elapsedMs = watch.elapsedMilliseconds;
-      final text = buffer.toString();
+      final text = textAccumulator.text;
       final toolCalls = adapter.streamExtractToolCalls(decoded.frames);
       final diagnostic = decoded.diagnostic(
         adapter.protocolType,
@@ -1113,7 +1115,7 @@ class ProtocolClient {
       );
     } catch (e) {
       watch.stop();
-      final text = buffer.toString();
+      final text = textAccumulator.text;
       _recorder?.updateResponse(
         requestId,
         text,

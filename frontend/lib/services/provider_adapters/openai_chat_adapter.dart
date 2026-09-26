@@ -232,15 +232,31 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
 
   @override
   String streamTextFromFrame(SseFrame frame) {
+    return streamTextChunkFromFrame(frame).text;
+  }
+
+  @override
+  ProviderStreamTextChunk streamTextChunkFromFrame(SseFrame frame) {
     final choices = frame.data['choices'];
-    if (choices is! List || choices.isEmpty) return '';
+    if (choices is! List || choices.isEmpty || choices.first is! Map) {
+      return const ProviderStreamTextChunk.incremental('');
+    }
     final choice = choices.first as Map;
     final delta = choice['delta'];
     if (delta is Map) {
       final text = contentText(delta['content']);
-      if (text.isNotEmpty) return text;
+      if (text.isNotEmpty) {
+        return ProviderStreamTextChunk.incremental(text);
+      }
     }
-    return contentText(choice['text']);
+    final message = choice['message'];
+    if (message is Map) {
+      final text = contentText(message['content']);
+      if (text.isNotEmpty) {
+        return ProviderStreamTextChunk.cumulative(text);
+      }
+    }
+    return ProviderStreamTextChunk.incremental(contentText(choice['text']));
   }
 
   @override
