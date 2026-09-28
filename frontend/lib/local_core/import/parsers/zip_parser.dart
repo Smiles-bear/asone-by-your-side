@@ -7,17 +7,20 @@ import '../import_models.dart';
 import 'generic_parser.dart';
 import 'import_parser.dart';
 import 'parser_models.dart';
+import 'rikkahub_backup_reader.dart';
 
 class ZipImportParser implements ImportParser {
-  ZipImportParser(this.nestedParsers);
+  ZipImportParser(this.nestedParsers, {RikkaHubBackupReader? rikkahubReader})
+    : _rikkahubReader = rikkahubReader ?? RikkaHubBackupReader();
 
   final List<ImportParser> nestedParsers;
+  final RikkaHubBackupReader _rikkahubReader;
 
   @override
   String get id => 'zip-safe-container';
 
   @override
-  String get version => '2.0.0';
+  String get version => '2.1.0';
 
   @override
   Set<String> get capabilities => const {
@@ -83,6 +86,11 @@ class ZipImportParser implements ImportParser {
           extractionErrors[path] = error;
         }
       }
+      final rikkahub = await _rikkahubReader.parseIfRecognized(
+        entries: extracted,
+        sourceName: source.name,
+      );
+      if (rikkahub != null) return rikkahub;
       final parsedEntries = <({int index, String name, ParsedImport parsed})>[];
       for (var entryIndex = 0; entryIndex < entries.length; entryIndex++) {
         final entry = entries[entryIndex];
@@ -204,6 +212,8 @@ class ZipImportParser implements ImportParser {
         boundariesSafe: errors.isEmpty,
         sourceName: source.name,
       );
+    } on FileSystemException {
+      rethrow;
     } on Object catch (error) {
       return ParsedImport(
         bundle: const ImportBundle(
@@ -383,7 +393,10 @@ List<_ZipEntry> _readCentralDirectory(
       throw const FormatException('ZIP 汇总大小超过安全阈值');
     }
     final ratio = uncompressedSize / max(1, compressedSize);
-    if (ratio > limits.maxCompressionRatio) {
+    final boundedRikkahubSharedMemory =
+        name.replaceAll('\\', '/').split('/').last == 'rikka_hub-shm' &&
+        uncompressedSize <= 64 * 1024;
+    if (ratio > limits.maxCompressionRatio && !boundedRikkahubSharedMemory) {
       throw FormatException(
         'ZIP 压缩比 ${ratio.toStringAsFixed(1)} 超过安全阈值: $name',
       );

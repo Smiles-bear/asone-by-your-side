@@ -125,4 +125,13 @@ void main() {
     expect(accumulator.add(second), '第二段');
     expect(accumulator.text, '第一段第二段');
   });
+
+  test('社区 API 将 HTTP 402 归类为服务商额度异常', () {
+    final error = normalizeHttpError(402, {
+      'error': {'message': 'insufficient balance'},
+    }, 'payment required');
+
+    expect(error.code, 'ACCOUNT_BILLING');
+    expect(error.message, '服务商账户、余额或额度异常');
+  });
 }

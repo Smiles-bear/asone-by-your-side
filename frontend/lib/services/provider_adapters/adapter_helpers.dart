@@ -265,6 +265,13 @@ NormalizedError normalizeHttpError(
         statusCode: statusCode,
         detail: _safePreview(serverMessage ?? text),
       );
+    case 402:
+      return NormalizedError(
+        'ACCOUNT_BILLING',
+        '服务商账户、余额或额度异常',
+        statusCode: statusCode,
+        detail: _safePreview(serverMessage ?? text),
+      );
     case 404:
       return NormalizedError(
         'ENDPOINT_NOT_FOUND',

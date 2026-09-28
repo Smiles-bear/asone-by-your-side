@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
+import 'deepseek_share_source.dart';
 
 class PublicLinkReadException implements Exception {
   const PublicLinkReadException(this.message, {this.requiresFile = false});
@@ -37,6 +38,11 @@ class HttpPublicLinkSourceReader implements LinkSourceReader {
   @override
   Future<PublicLinkContent> read(Uri uri) async {
     _validateUri(uri);
+    final shareContent = deepSeekShareContentUri(uri);
+    if (shareContent != null) {
+      final response = await read(shareContent);
+      return decodeDeepSeekShare(response.bytes);
+    }
     var current = uri;
     for (var redirects = 0; redirects <= maximumRedirects; redirects++) {
       final request = await _client
@@ -86,7 +92,7 @@ class HttpPublicLinkSourceReader implements LinkSourceReader {
       }
       final builder = BytesBuilder(copy: false);
       var received = 0;
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(const Duration(seconds: 30))) {
         received += chunk.length;
         if (received > maximumBytes) {
           throw const PublicLinkReadException('链接内容过大，请改用文件导入');

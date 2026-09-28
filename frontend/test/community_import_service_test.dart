@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:asone_demo_core/asone_demo_core.dart';
 import 'package:azruiyoi_community/local_core/core_database.dart';
+import 'package:azruiyoi_community/local_core/import/deepseek_share_source.dart';
 import 'package:azruiyoi_community/local_core/import/import_job.dart';
 import 'package:azruiyoi_community/local_core/import/import_plan.dart';
 import 'package:azruiyoi_community/public_core.dart';
@@ -123,6 +124,57 @@ void main() {
     final messages = await core.messages.getMessages(conversation.id);
     expect(messages.map((message) => message.role.name), ['user', 'assistant']);
     expect(messages.map((message) => message.content), ['早上好', '早上好！']);
+  });
+
+  test('社区版可解析 DeepSeek 分享链接的新 fragments 正文结构', () {
+    final content = decodeDeepSeekShare(
+      Uint8List.fromList(
+        utf8.encode(
+          jsonEncode({
+            'code': 0,
+            'data': {
+              'biz_code': 0,
+              'biz_data': {
+                'title': '分享对话',
+                'messages': [
+                  {
+                    'message_id': 'm-1',
+                    'parent_id': null,
+                    'role': 'USER',
+                    'fragments': [
+                      {'type': 'REQUEST', 'content': '你好'},
+                    ],
+                  },
+                  {
+                    'message_id': 'm-2',
+                    'parent_id': 'm-1',
+                    'role': 'ASSISTANT',
+                    'fragments': [
+                      {'type': 'THINK', 'content': '内部思考'},
+                      {'type': 'RESPONSE', 'content': '你好，我是助手。'},
+                    ],
+                  },
+                ],
+              },
+            },
+          }),
+        ),
+      ),
+    );
+
+    final decoded = jsonDecode(utf8.decode(content.bytes)) as Map;
+    final messages = decoded['messages'] as List;
+    expect(messages.map((message) => (message as Map)['content']), [
+      '你好',
+      '你好，我是助手。',
+    ]);
+    expect(messages.first['deepseek_omitted_thinking_count'], 1);
+    expect(
+      deepSeekShareContentUri(
+        Uri.parse('https://chat.deepseek.com/share/abc_123'),
+      ).toString(),
+      'https://chat.deepseek.com/api/v0/share/content?share_id=abc_123',
+    );
   });
 }
 

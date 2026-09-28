@@ -33,6 +33,14 @@ class UserFacingErrorPolicy {
     if (_containsAny(text, const ['http 400', 'status code of 400'])) {
       return '请求参数不受该模型支持，请检查模型配置后重试。';
     }
+    if (_containsAny(text, const [
+      'http 402',
+      'status code of 402',
+      'payment required',
+      'insufficient balance',
+    ])) {
+      return '请检查服务商账户、余额或额度。';
+    }
     if (_containsAny(text, const ['429', 'rate limit', 'quota'])) {
       return '请检查服务额度后重试。';
     }
