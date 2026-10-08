@@ -71,6 +71,15 @@ void applyModelRequestPolicy(
 }) {
   if (protocolType != ProtocolType.openaiChat) return;
   final normalizedModel = modelId.trim().toLowerCase();
+  final host = Uri.tryParse(baseUrl.trim())?.host.toLowerCase() ?? '';
+  // OpenRouter 使用统一的 reasoning 对象，而不是 OpenAI 的独立字段。
+  // 只转换需要直接结果的请求，普通聊天仍保留服务商默认行为。
+  if (host == 'openrouter.ai' && directResponse) {
+    final effort = payload.remove('reasoning_effort');
+    if (effort != null && !payload.containsKey('reasoning')) {
+      payload['reasoning'] = <String, Object?>{'effort': effort};
+    }
+  }
 
   if (normalizedModel == 'grok-4.6') {
     final maxTokens = payload.remove('max_tokens');
@@ -80,7 +89,6 @@ void applyModelRequestPolicy(
   }
 
   if (normalizedModel != 'qwen3.8-max') return;
-  final host = Uri.tryParse(baseUrl.trim())?.host.toLowerCase() ?? '';
   final isOfficialQwen =
       host == 'dashscope.aliyuncs.com' ||
       host == 'dashscope-us.aliyuncs.com' ||

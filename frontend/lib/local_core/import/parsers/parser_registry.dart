@@ -2,6 +2,7 @@ import 'generic_parser.dart';
 import 'html_parser.dart';
 import 'import_parser.dart';
 import 'json_parser.dart';
+import 'key_value_chat_json_parser.dart';
 import 'parser_models.dart';
 import 'text_parsers.dart';
 import 'zip_parser.dart';
@@ -15,6 +16,7 @@ class ParserRegistry {
 
   factory ParserRegistry.defaults() {
     final nonArchive = <ImportParser>[
+      const KeyValueChatJsonImportParser(),
       const JsonImportParser(),
       const JsonLinesImportParser(),
       const HtmlImportParser(),

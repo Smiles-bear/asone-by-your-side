@@ -1,3 +1,5 @@
+import 'provider_adapters/protocol_types.dart';
+
 class ModelEndpointException implements Exception {
   const ModelEndpointException(this.message);
 
@@ -31,3 +33,22 @@ Uri modelEndpointUri(String rawBaseUrl, String endpoint) {
   final suffix = endpoint.replaceFirst(RegExp(r'^/+'), '');
   return Uri.parse('$base/$suffix');
 }
+
+/// 协议版本路径属于协议本身，不应要求用户为不同中转站手动补齐。
+String protocolModelBaseUrl(String rawBaseUrl, String protocol) {
+  final base = normalizeModelBaseUrl(rawBaseUrl);
+  if (protocol != ProtocolType.gemini) return base;
+  final uri = Uri.parse(base);
+  var path = uri.path;
+  if (path.isEmpty) {
+    path = '/v1beta';
+  } else if (path.endsWith('/v1')) {
+    path = '${path.substring(0, path.length - 3)}/v1beta';
+  }
+  return uri.replace(path: path).toString();
+}
+
+bool isGeminiModel(String modelId) => modelId
+    .replaceFirst(RegExp(r'^models/'), '')
+    .toLowerCase()
+    .startsWith('gemini-');

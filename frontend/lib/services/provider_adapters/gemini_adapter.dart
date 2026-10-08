@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../model_endpoint.dart';
 import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
 import 'adapter_types.dart';
@@ -32,19 +33,22 @@ class GeminiAdapter extends ModelProtocolAdapter {
   List<String> candidateEndpoints(String baseUrl) {
     // Gemini 非流式端点在运行时根据 modelId 拼接，这里返回 base 变体。
     // 实际端点由 runtimeEndpoint 生成。
-    final base = baseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final base = protocolModelBaseUrl(baseUrl, protocolType);
     return [base];
   }
 
   /// 运行时端点（非流式）。
   String generateContentEndpoint(String baseUrl, String modelId) {
-    return joinEndpoint(baseUrl, '${_modelName(modelId)}:generateContent');
+    return joinEndpoint(
+      protocolModelBaseUrl(baseUrl, protocolType),
+      '${_modelName(modelId)}:generateContent',
+    );
   }
 
   /// 运行时端点（流式）。
   String streamGenerateContentEndpoint(String baseUrl, String modelId) {
     return joinEndpoint(
-      baseUrl,
+      protocolModelBaseUrl(baseUrl, protocolType),
       '${_modelName(modelId)}:streamGenerateContent?alt=sse',
     );
   }
@@ -60,6 +64,7 @@ class GeminiAdapter extends ModelProtocolAdapter {
   Map<String, Object?> _convertMessages(List<Map<String, Object?>> messages) {
     final systemParts = <String>[];
     final contents = <Map<String, Object?>>[];
+    final nativeCallNames = <String, String>{};
     for (final message in messages) {
       final role = (message['role'] as String?) ?? 'user';
       final content = message['content'] ?? '';
@@ -72,13 +77,19 @@ class GeminiAdapter extends ModelProtocolAdapter {
       // 处理 tool 角色 → 转换为 user 角色的 functionResponse part
       if (role == 'tool') {
         final toolCallId = message['tool_call_id'] as String?;
+        final toolName = message['tool_name'] as String?;
         final toolContent = contentText(content);
         contents.add({
           'role': 'user',
           'parts': [
             {
               'functionResponse': {
-                'name': toolCallId ?? 'unknown',
+                if (nativeCallNames.containsKey(toolCallId)) 'id': toolCallId,
+                'name':
+                    toolName ??
+                    nativeCallNames[toolCallId] ??
+                    toolCallId ??
+                    'unknown',
                 'response': {'result': toolContent},
               },
             },
@@ -150,6 +161,26 @@ class GeminiAdapter extends ModelProtocolAdapter {
               'functionCall': {'name': name, 'args': args},
             });
           }
+        }
+      }
+
+      final native = message['_provider_continuation'];
+      if (role == 'assistant' &&
+          native is Map &&
+          native['protocol'] == protocolType &&
+          native['items'] is List) {
+        parts
+          ..clear()
+          ..addAll(
+            (native['items'] as List).whereType<Map>().map(
+              (item) => item.cast<String, Object?>(),
+            ),
+          );
+      }
+      for (final part in parts) {
+        final call = part['functionCall'];
+        if (call is Map && call['id'] is String && call['name'] is String) {
+          nativeCallNames[call['id'] as String] = call['name'] as String;
         }
       }
 
@@ -475,9 +506,38 @@ class GeminiAdapter extends ModelProtocolAdapter {
   /// 把 OpenAI 风格 schema（小写 type）转成 Gemini 风格（大写 type）。
   Map<String, Object?> _convertSchemaToGemini(Map<dynamic, dynamic> schema) {
     final result = <String, Object?>{};
+    for (final key in const [
+      'description',
+      'title',
+      'format',
+      'nullable',
+      'minimum',
+      'maximum',
+      'minItems',
+      'maxItems',
+      'minLength',
+      'maxLength',
+      'pattern',
+      'minProperties',
+      'maxProperties',
+      'propertyOrdering',
+      'default',
+      'example',
+    ]) {
+      if (schema.containsKey(key)) result[key] = schema[key];
+    }
     final type = schema['type'];
     if (type is String) {
       result['type'] = type.toUpperCase();
+    }
+    final items = schema['items'];
+    if (items is Map) result['items'] = _convertSchemaToGemini(items);
+    final alternatives = schema['anyOf'];
+    if (alternatives is List) {
+      result['anyOf'] = alternatives
+          .whereType<Map>()
+          .map(_convertSchemaToGemini)
+          .toList();
     }
     final properties = schema['properties'];
     if (properties is Map) {

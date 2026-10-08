@@ -176,6 +176,86 @@ void main() {
       'https://chat.deepseek.com/api/v0/share/content?share_id=abc_123',
     );
   });
+
+  test('社区版可导入双层键值 JSON，并排除私有字段和受阻消息', () async {
+    sqfliteFfiInit();
+    final root = await Directory.systemTemp.createTemp(
+      'community-key-value-import-',
+    );
+    final database = CoreDatabase.forTesting(
+      databaseFactory: databaseFactoryFfi,
+      supportDirectoryProvider: () async => root,
+    );
+    addTearDown(() async {
+      await database.close();
+      await root.delete(recursive: true);
+    });
+    final core = PublicCore(
+      database: database,
+      fallback: DemoCore.withDemoSeed(),
+    );
+    await core.open();
+
+    final backup = {
+      'contacts': jsonEncode([
+        {'id': 'c1', 'name': '联系人一', 'persona': 'private-config-sentinel'},
+      ]),
+      'account': 'private-account-sentinel',
+      'chat:c1': jsonEncode([
+        {'role': 'user', 'content': '第一句', 'createdAt': 1700000000000},
+        {
+          'role': 'assistant',
+          'content': 'blocked-body-sentinel',
+          'createdAt': 1700000001000,
+          'blockedWhenSent': true,
+        },
+        {
+          'role': 'assistant',
+          'content': '第一条回复',
+          'createdAt': 1700000002000,
+        },
+      ]),
+    };
+    final created = await core.imports.createImportFromBytes(
+      'key-value-backup.json',
+      Uint8List.fromList(utf8.encode(jsonEncode(backup))),
+    );
+
+    expect(created.preview.parserSummary?.parserId, 'key-value-chat-json');
+    expect(created.preview.messageCount, 2);
+    expect(created.preview.warnings, ['已排除1条发送受阻的助手消息。']);
+    expect(created.preview.sampleMessages.map((item) => item.content), [
+      '第一句',
+      '第一条回复',
+    ]);
+    expect(
+      created.preview.sampleMessages.map((item) => item.content),
+      isNot(contains('blocked-body-sentinel')),
+    );
+
+    await core.imports.submitGroupedImportPlan(
+      created.job.jobId,
+      const GroupedImportPlan(
+        groups: [
+          ImportPlanGroup(
+            groupId: 'key-value',
+            sourceConversationIds: ['conversation-0'],
+            assistantName: '导入助手',
+            conversationTitle: '联系人一',
+          ),
+        ],
+        conversationOrder: ['conversation-0'],
+      ),
+    );
+    await core.imports.startImport(created.job.jobId);
+    await _waitForCompletion(core, created.job.jobId);
+
+    final conversation = (await core.conversations.getConversations()).single;
+    final messages = await core.messages.getMessages(conversation.id);
+    expect(messages.map((item) => item.content), ['第一句', '第一条回复']);
+    expect(messages.toString(), isNot(contains('private-config-sentinel')));
+    expect(messages.toString(), isNot(contains('private-account-sentinel')));
+  });
 }
 
 Future<ImportJob> _waitForCompletion(PublicCore core, String jobId) async {

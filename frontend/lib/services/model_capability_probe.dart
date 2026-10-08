@@ -20,9 +20,11 @@ export 'package:asone_contracts/asone_contracts.dart'
 /// 若配置的 protocol_type 为 auto，首次调用前自动识别协议并缓存适配器。
 /// 常用五项能力共用同一适配器；音频由实际使用场景按需调用独立探针。
 class ModelCapabilityProbe {
-  ModelCapabilityProbe({Dio? dio}) : _client = ProtocolClient(dio: dio);
+  ModelCapabilityProbe({Dio? dio, this.redetectProtocol = false})
+    : _client = ProtocolClient(dio: dio);
 
   final ProtocolClient _client;
+  final bool redetectProtocol;
 
   /// 贯穿本次检测的取消令牌。设置后所有请求都携带它，
   /// 取消会立即终止底层 HTTP 请求。
@@ -40,7 +42,7 @@ class ModelCapabilityProbe {
     if (_resolvedAdapter != null) return _resolvedAdapter;
     if (_resolutionFailed) return null;
 
-    if (service.protocolType != ProtocolType.auto) {
+    if (service.protocolType != ProtocolType.auto && !redetectProtocol) {
       _resolvedAdapter = AdapterRegistry.instance.get(service.protocolType);
       _resolvedProtocol = service.protocolType;
       return _resolvedAdapter;
