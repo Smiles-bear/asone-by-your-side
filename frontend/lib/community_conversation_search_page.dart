@@ -9,6 +9,7 @@ import 'widgets/asone_app_bar.dart';
 import 'widgets/asone_empty_state.dart';
 import 'widgets/asone_feedback.dart';
 import 'widgets/asone_icons.dart';
+import 'widgets/chat_page_route.dart';
 
 /// 社区版全局聊天记录搜索。
 ///
@@ -144,7 +145,7 @@ class _CommunityConversationSearchPageState
         .where((item) => item.id == conversation.assistantId)
         .firstOrNull;
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
+      ChatPageRoute(
         builder: (_) => CommunityChatPage(
           initialConversation: conversation,
           initialAssistant: assistant,

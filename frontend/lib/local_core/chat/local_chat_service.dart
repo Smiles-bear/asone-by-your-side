@@ -13,6 +13,7 @@ import '../../services/provider_adapters/adapter_types.dart';
 import '../../services/provider_adapters/gemini_adapter.dart';
 import '../../services/provider_adapters/incremental_sse_decoder.dart';
 import '../../services/provider_adapters/model_protocol_adapter.dart';
+import '../../services/provider_adapters/model_output_length_failure.dart';
 import '../../services/provider_adapters/protocol_context_recorder.dart';
 import '../../services/provider_adapters/protocol_types.dart';
 import '../../services/provider_adapters/upstream_failure_policy.dart';
@@ -287,6 +288,34 @@ class LocalChatService {
           'assistant',
           content,
           answerStatus: 'cancelled',
+        );
+      }
+    }
+
+    Future<void> finalizeInitialFailure(Object error) async {
+      if (hasAnswerVersion || replyCommitter != null) return;
+      streamState?.finish();
+      final content = visibleStreamedContent();
+      final hint = UserFacingErrorPolicy.failureHintFor(
+        error,
+        hasPartialContent: content.trim().isNotEmpty,
+      );
+      final creation = streamState?.messageCreationFuture;
+      if (creation != null) {
+        final created = await creation;
+        await _coreRepository.updateMessageContent(
+          created.id!,
+          content,
+          answerStatus: 'failed',
+          failureHint: hint,
+        );
+      } else {
+        await _coreRepository.saveMessage(
+          conversationId,
+          'assistant',
+          content,
+          answerStatus: 'failed',
+          failureHint: hint,
         );
       }
     }
@@ -601,6 +630,7 @@ class LocalChatService {
             baseUrl: baseUrl,
             apiKey: apiKey,
             model: model,
+            providerId: modelSnapshot.providerId,
             messages: conversationMessages,
             maxTokens: maxOutputTokens,
             tools: tools.isNotEmpty ? tools : null,
@@ -610,7 +640,7 @@ class LocalChatService {
             onReasoningDelta: onReasoningDelta, // 传递 reasoning 回调
             cancelToken: cancelToken,
           );
-          modelRequestCount++;
+          modelRequestCount += result.requestCount;
 
           finalAssistantText = result.text;
           // 累积 reasoning（多轮工具调用情况下可能有多段）
@@ -1272,6 +1302,7 @@ class LocalChatService {
         DebugLogger.instance.info('请求已取消', tag: 'LocalChat');
         onDone(error: '已取消');
       } else {
+        await finalizeInitialFailure(error);
         await finalizeAnswerVersionFailure(
           error: error,
           finalContent: streamState?.finalText ?? '',
@@ -1307,6 +1338,7 @@ class LocalChatService {
         error: error,
         finalContent: streamState?.finalText ?? '',
       );
+      await finalizeInitialFailure(error);
       DebugLogger.instance.error(
         error is HttpException || error is SocketException ? '连接中断' : '生成失败',
         tag: 'LocalChat',
@@ -1408,6 +1440,7 @@ class LocalChatService {
       String reasoning,
       List<ProviderToolCall> toolCalls,
       Map<String, int>? usage,
+      String terminationReason,
     })
   >
   _executeModelCall({
@@ -1421,6 +1454,7 @@ class LocalChatService {
     required void Function(String delta) onDelta,
     void Function(String reasoningDelta)? onReasoningDelta,
     CancelToken? cancelToken,
+    Map<String, Object?> payloadOverrides = const {},
   }) async {
     final watch = Stopwatch()..start();
     final base = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
@@ -1432,6 +1466,7 @@ class LocalChatService {
       temperature: 0.7,
       tools: tools,
     );
+    payload.addAll(payloadOverrides);
     applyModelRequestPolicy(
       payload,
       baseUrl: base,
@@ -1491,7 +1526,7 @@ class LocalChatService {
     final stream = response?.data?.stream;
     if (stream == null) throw StateError('响应流为空');
 
-    final buffer = StringBuffer();
+    final textAccumulator = ProviderStreamTextAccumulator();
     final reasoningBuffer = StringBuffer();
     var lastEventType = '';
     late final IncrementalSseResult decoded;
@@ -1508,9 +1543,10 @@ class LocalChatService {
           lastEventType = frame.eventType.isNotEmpty
               ? frame.eventType
               : frame.data['type']?.toString() ?? lastEventType;
-          final text = adapter.streamTextFromFrame(frame);
+          final text = textAccumulator.add(
+            adapter.streamTextChunkFromFrame(frame),
+          );
           if (text.isNotEmpty) {
-            buffer.write(text);
             onDelta(text);
           }
           final reasoning = adapter.streamReasoningFromFrame(frame);
@@ -1532,7 +1568,7 @@ class LocalChatService {
             'Last event: $lastEventType\n'
             'Error type: ${error.runtimeType}\n'
             'Elapsed: ${watch.elapsedMilliseconds}ms\n'
-            'Has content: ${buffer.isNotEmpty}',
+            'Has content: ${textAccumulator.text.isNotEmpty}',
       );
       throw StateError('流式传输中断');
     }
@@ -1554,15 +1590,25 @@ class LocalChatService {
             'Last event: $lastEventType\n'
             'Termination: $terminationReason\n'
             'Elapsed: ${watch.elapsedMilliseconds}ms\n'
-            'Has content: ${buffer.isNotEmpty}',
+            'Has content: ${textAccumulator.text.isNotEmpty}',
       );
       final toolCalls = adapter.streamExtractToolCalls(decoded.frames);
       UpstreamFailurePolicy.throwIfTransientStream(
         reason: terminationReason,
-        hasVisibleText: buffer.toString().trim().isNotEmpty,
+        hasVisibleText: textAccumulator.text.trim().isNotEmpty,
         hasVisibleReasoning: reasoningBuffer.toString().trim().isNotEmpty,
         hasToolCalls: toolCalls.isNotEmpty,
       );
+      if (terminationReason == 'finish_reason:length') {
+        throw ModelOutputLengthFailure(
+          outputLimit: maxTokens,
+          outputTokens: _extractStreamUsage(decoded.frames)?['output_tokens'],
+          textLength: textAccumulator.text.length,
+          reasoningLength: reasoningBuffer.length,
+          hasVisibleText: textAccumulator.text.trim().isNotEmpty,
+          hasToolCalls: toolCalls.isNotEmpty,
+        );
+      }
       throw StateError('模型流异常: $terminationReason');
     }
 
@@ -1575,7 +1621,7 @@ class LocalChatService {
           'Last event: $lastEventType\n'
           'Termination: $terminationReason\n'
           'Elapsed: ${watch.elapsedMilliseconds}ms\n'
-          'Text length: ${buffer.length}',
+          'Text length: ${textAccumulator.text.length}',
     );
 
     // 从流中提取工具调用
@@ -1584,10 +1630,11 @@ class LocalChatService {
     final usage = _extractStreamUsage(decoded.frames);
 
     return (
-      text: buffer.toString(),
+      text: textAccumulator.text,
       reasoning: reasoningBuffer.toString(),
       toolCalls: toolCalls,
       usage: usage,
+      terminationReason: terminationReason,
     );
   }
 

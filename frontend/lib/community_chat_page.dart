@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 
 import 'pages/model_service_list_page.dart';
+import 'services/user_facing_error_policy.dart';
 import 'theme/asone_theme.dart';
 import 'widgets/anchored_popup_menu.dart';
 import 'widgets/asone_avatar.dart';
@@ -326,7 +327,8 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
   String _failureMessage(String detail) {
     final normalized = detail.trim();
     if (normalized.isEmpty) return '模型服务未返回可用内容，请检查配置后重试。';
-    return '模型服务调用失败：$normalized';
+    if (normalized == '已取消' || normalized == '生成已取消') return '回复已中断';
+    return UserFacingErrorPolicy.failureHintFor(normalized);
   }
 
   void _collapseMessageActions() {

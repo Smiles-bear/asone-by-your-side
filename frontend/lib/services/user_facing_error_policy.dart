@@ -6,13 +6,29 @@ class UserFacingErrorPolicy {
   static const assistantReplyFailed = '回复失败';
   static const defaultFailureHint = '请检查网络设置后重试。';
   static const streamingInterrupted = '回复传输中断，可重新生成。';
+  static const outputLengthLimited = 'M005-回复达到长度上限，已保留收到的内容，可重新回答。';
+  static const outputLengthWithoutBody = 'M005-回复达到本次输出上限，未生成正文，请重新回答或调整输出额度。';
+  static const reasoningLengthLimited = 'M005-思考已达到本次输出上限，未生成正文，请重新回答或调整输出额度。';
+  static const outputLengthUnknown = 'M005-回复达到本次输出上限，请重新回答或调整输出额度。';
 
   static String failureHintFor(
     Object? error, {
     bool hasPartialContent = false,
   }) {
-    if (hasPartialContent) return streamingInterrupted;
     final text = error?.toString().toLowerCase() ?? '';
+    if (text.contains('finish_reason:length')) {
+      if (hasPartialContent || text.contains('(partial_content)')) {
+        return outputLengthLimited;
+      }
+      if (text.contains('(reasoning_only)')) return reasoningLengthLimited;
+      if (text.contains('(no_body)')) return outputLengthWithoutBody;
+      return outputLengthUnknown;
+    }
+    if (hasPartialContent) return streamingInterrupted;
+    if (text.contains('模型服务协议尚未确定')) {
+      return 'M006-请重新检测模型能力后重试。';
+    }
+    if (text.contains('模型服务配置不完整')) return '请检查API配置后重试。';
     if (text.contains('vision_route_unavailable')) {
       return '请在模型设置中配置可用的图片理解模型后重试。';
     }
@@ -68,6 +84,7 @@ class UserFacingErrorPolicy {
       'receive timeout',
       'network error',
       'failed host lookup',
+      'software caused connection abort',
     ])) {
       return '网络连接异常，请稍后重试。';
     }

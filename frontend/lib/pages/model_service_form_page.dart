@@ -29,6 +29,7 @@ class ModelServiceFormPage extends StatefulWidget {
   final ModelServiceRepositoryApi? modelServices;
   final ModelDiscoveryApi? discovery;
   final CapabilityDetectionApi? capabilityDetection;
+  final bool showCapabilityTestsOnOpen;
 
   const ModelServiceFormPage({
     super.key,
@@ -36,6 +37,7 @@ class ModelServiceFormPage extends StatefulWidget {
     this.modelServices,
     this.discovery,
     this.capabilityDetection,
+    this.showCapabilityTestsOnOpen = false,
   });
 
   @override
@@ -95,6 +97,11 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
       _selectedProviderId = service.providerId;
       _tempServiceId = service.id;
       unawaited(_loadCapabilityVerdicts(service.id));
+      if (widget.showCapabilityTestsOnOpen) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_showTestMenu());
+        });
+      }
     }
   }
 

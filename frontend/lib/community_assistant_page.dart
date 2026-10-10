@@ -5,6 +5,7 @@ import 'widgets/asone_empty_state.dart';
 import 'widgets/asone_feedback.dart';
 import 'widgets/asone_icons.dart';
 import 'widgets/asone_list_tile.dart';
+import 'widgets/chat_page_route.dart';
 import 'pages/model_service_list_page.dart';
 import 'package:flutter/material.dart';
 
@@ -83,7 +84,7 @@ class _CommunityAssistantListPageState
           .getOrCreatePrimaryConversation(assistant.id);
       if (!mounted) return;
       await Navigator.of(context).push<void>(
-        MaterialPageRoute(
+        ChatPageRoute(
           builder: (_) => CommunityChatPage(
             initialConversation: conversation,
             initialAssistant: assistant,

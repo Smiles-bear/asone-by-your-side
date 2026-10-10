@@ -11,6 +11,7 @@ import 'adapter_registry.dart';
 import 'incremental_sse_decoder.dart';
 import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
+import 'model_output_length_failure.dart';
 import 'structured_output_receiver.dart';
 import 'protocol_types.dart';
 import 'upstream_failure_policy.dart';
@@ -21,6 +22,7 @@ import 'protocol_context_recorder.dart';
 part 'structured_protocol_result.dart';
 part 'protocol_stream_helpers.dart';
 part 'protocol_request_inspection.dart';
+part 'protocol_endpoint_hints.dart';
 
 /// 流式调用结果（含累积文本、事件类型集合与诊断）。
 class ProtocolStreamResult {
@@ -61,7 +63,7 @@ class ProtocolResolution {
 /// 所有调用方（能力探针、聊天、记忆整理）通过此类发起请求，
 /// 内部完成协议自动识别、端点变体、错误归一化与安全诊断收集。
 class ProtocolClient {
-  ProtocolClient({Dio? dio})
+  ProtocolClient({Dio? dio, this.configurationScope = ''})
     : _dio =
           dio ??
           Dio(
@@ -72,6 +74,7 @@ class ProtocolClient {
           );
 
   final Dio _dio;
+  final String configurationScope;
 
   /// 上下文记录接缝（公开壳未挂载，所有调用点均为 null-aware）。
   ProtocolContextRecorder? get _recorder => ProtocolContextRecorder.current;
@@ -571,7 +574,18 @@ class ProtocolClient {
       ...adapter.headers(baseUrl, apiKey),
       ...?requestHeaders,
     };
-    final endpoints = _nonStreamEndpoints(adapter, baseUrl, modelId);
+    final (
+      hints: hints,
+      key: endpointKey,
+      endpoints: endpoints,
+    ) = _endpointRoute(
+      protocol: adapter.protocolType,
+      baseUrl: baseUrl,
+      modelId: modelId,
+      apiKey: apiKey,
+      headers: requestHeaders ?? const {},
+      candidates: _nonStreamEndpoints(adapter, baseUrl, modelId),
+    );
 
     Response<dynamic>? response;
     String? usedEndpoint;
@@ -592,9 +606,13 @@ class ProtocolClient {
             cancelToken: cancelToken,
           );
           usedEndpoint = endpoint;
+          _rememberEndpoint(hints, endpointKey, endpoint, response.statusCode);
           break endpointLoop;
         } on DioException catch (error) {
           final status = error.response?.statusCode;
+          if (status == 404 && hints[endpointKey] == endpoint) {
+            hints.remove(endpointKey);
+          }
           if (_isRetryableStatus(status) && attempt == 0) {
             await Future<void>.delayed(const Duration(milliseconds: 600));
             continue;
@@ -1047,7 +1065,15 @@ class ProtocolClient {
         text.length,
       );
       if (decoded.terminal.isFailure) {
-        final detail = '流式响应异常（${decoded.terminal.reason}）';
+        final detail = decoded.terminal.reason == 'finish_reason:length'
+            ? ModelOutputLengthFailure(
+                outputLimit: maxTokens ?? 0,
+                textLength: text.length,
+                reasoningLength: reasoningBuffer.length,
+                hasVisibleText: text.trim().isNotEmpty,
+                hasToolCalls: toolCalls.isNotEmpty,
+              ).message
+            : '流式响应异常（${decoded.terminal.reason}）';
         _recorder?.updateResponse(
           requestId,
           text,

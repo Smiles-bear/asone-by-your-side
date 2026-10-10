@@ -10,6 +10,7 @@ import '../services/config_service.dart';
 import '../services/conversation_message_events.dart';
 import '../theme/asone_theme.dart';
 import '../widgets/asone_avatar.dart';
+import '../widgets/chat_page_route.dart';
 import '../widgets/asone_bottom_sheet.dart';
 import '../widgets/asone_button.dart';
 import '../widgets/asone_dialog.dart';
@@ -246,7 +247,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
     _clearConversationUnread(conversation.id);
     await Navigator.push(
       context,
-      MaterialPageRoute(
+      ChatPageRoute(
         builder: (_) => buildChatPage(
           config: _config!,
           conversation: conversation,
@@ -362,7 +363,7 @@ class _ConversationListPageState extends State<ConversationListPage> {
       if (!mounted) return;
       await Navigator.push(
         context,
-        MaterialPageRoute(
+        ChatPageRoute(
           builder: (_) {
             final buildChatPage = ConversationListRoutes.buildChatPage;
             if (buildChatPage == null) return const SizedBox.shrink();

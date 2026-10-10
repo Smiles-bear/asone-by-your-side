@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'adapter_types.dart';
 import 'protocol_types.dart';
+import 'reasoning_recovery_policy.dart';
 
 /// 适配器共享工具：端点拼接、内容提取、JSON 解包、SSE 解析、错误归一化。
 ///
@@ -101,6 +102,13 @@ void applyModelRequestPolicy(
     }
   }
 }
+
+/// Use only verified provider/protocol overrides for a reasoning-only recovery.
+Map<String, Object?> reasoningOnlyRecoveryPayload({
+  required String providerId,
+  required String modelId,
+  required String protocolType,
+}) => ReasoningRecoveryPolicy.payload(providerId, protocolType);
 
 /// 从 OpenAI 风格 content 字段提取文本。
 /// content 可以是 String，也可以是 [{type:text, text:...}, ...] 列表。

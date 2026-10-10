@@ -7,6 +7,7 @@ extension on LocalChatService {
       String reasoning,
       List<ProviderToolCall> toolCalls,
       Map<String, int>? usage,
+      int requestCount,
     })
   >
   _executeModelCallWithRetry({
@@ -14,6 +15,7 @@ extension on LocalChatService {
     required String baseUrl,
     required String apiKey,
     required String model,
+    String providerId = '',
     required List<Map<String, Object?>> messages,
     required int maxTokens,
     required List<Map<String, Object?>>? tools,
@@ -21,9 +23,11 @@ extension on LocalChatService {
     void Function(String reasoningDelta)? onReasoningDelta,
     CancelToken? cancelToken,
   }) async {
+    Map<String, Object?> payloadOverrides = const {};
+    Map<String, int>? recoveryUsage;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        return await _executeModelCall(
+        final result = await _executeModelCall(
           adapter: adapter,
           baseUrl: baseUrl,
           apiKey: apiKey,
@@ -34,6 +38,38 @@ extension on LocalChatService {
           onDelta: onDelta,
           onReasoningDelta: onReasoningDelta,
           cancelToken: cancelToken,
+          payloadOverrides: payloadOverrides,
+        );
+        final reasoningOnly =
+            result.text.trim().isEmpty &&
+            result.toolCalls.isEmpty &&
+            result.reasoning.trim().isNotEmpty;
+        final recoveryPayload = reasoningOnlyRecoveryPayload(
+          providerId: providerId,
+          modelId: model,
+          protocolType: adapter.protocolType,
+        );
+        if (reasoningOnly &&
+            attempt == 0 &&
+            !(cancelToken?.isCancelled ?? false) &&
+            result.terminationReason == 'finish_reason:stop' &&
+            recoveryPayload.isNotEmpty) {
+          payloadOverrides = recoveryPayload;
+          recoveryUsage = result.usage;
+          continue;
+        }
+        final usage = result.usage;
+        return (
+          text: result.text,
+          reasoning: result.reasoning,
+          toolCalls: result.toolCalls,
+          usage: recoveryUsage == null
+              ? usage
+              : <String, int>{
+                  for (final key in {...recoveryUsage.keys, ...?usage?.keys})
+                    key: (recoveryUsage[key] ?? 0) + (usage?[key] ?? 0),
+                },
+          requestCount: attempt + 1,
         );
       } catch (error) {
         final retry =

@@ -34,12 +34,14 @@ class IncrementalSseResult {
     required this.eventTypes,
     required this.terminal,
     required this.lastEventType,
+    this.receivedDone = false,
   });
 
   final List<SseFrame> frames;
   final List<String> eventTypes;
   final ProviderStreamTerminal terminal;
   final String lastEventType;
+  final bool receivedDone;
 
   bool get usedCleanEofFallback => !terminal.isTerminal;
 
@@ -126,6 +128,15 @@ Future<IncrementalSseResult> decodeIncrementalSse({
     isProgressFrame: policy.isProgressFrame,
   );
   var terminal = const ProviderStreamTerminal.none();
+  var receivedDone = false;
+  void acceptTerminal(ProviderStreamTerminal next) {
+    if (next.reason == '[DONE]') {
+      receivedDone = true;
+      if (!terminal.isTerminal) terminal = next;
+    } else if (next.isTerminal && !terminal.isFailure) {
+      terminal = next;
+    }
+  }
 
   final lines = StreamIterator(
     utf8.decoder.bind(stream).transform(const LineSplitter()),
@@ -154,7 +165,7 @@ Future<IncrementalSseResult> decodeIncrementalSse({
         progressDeadline = DateTime.now().add(policy.progressIdleTimeout);
       }
       if (!next.isTerminal) continue;
-      terminal = next;
+      acceptTerminal(next);
       if (next.isFailure || !next.reason.startsWith('finish_reason:')) break;
       trailerDeadline ??= DateTime.now().add(policy.usageTrailerTimeout);
     }
@@ -165,7 +176,7 @@ Future<IncrementalSseResult> decodeIncrementalSse({
   if (accumulator.pendingData.isNotEmpty) {
     checkCancelled?.call();
     final last = accumulator.flushPending();
-    if (last.isTerminal) terminal = last;
+    acceptTerminal(last);
   }
 
   return IncrementalSseResult(
@@ -173,6 +184,7 @@ Future<IncrementalSseResult> decodeIncrementalSse({
     eventTypes: List.unmodifiable(accumulator.eventTypes),
     terminal: terminal,
     lastEventType: accumulator.lastEventType,
+    receivedDone: receivedDone,
   );
 }
 
