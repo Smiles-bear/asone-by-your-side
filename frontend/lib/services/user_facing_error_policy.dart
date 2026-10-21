@@ -1,4 +1,5 @@
 import '../models/message.dart';
+import 'provider_adapters/adapter_types.dart';
 
 class UserFacingErrorPolicy {
   const UserFacingErrorPolicy._();
@@ -25,6 +26,40 @@ class UserFacingErrorPolicy {
       return outputLengthUnknown;
     }
     if (hasPartialContent) return streamingInterrupted;
+    if (error is AdapterRequestException) {
+      if (RegExp(
+        r'insufficient[ _-](?:balance|credit|quota)|payment required|余额不足|额度不足',
+        caseSensitive: false,
+      ).hasMatch(error.error.providerMessage)) {
+        return '请检查服务商账户、余额或额度。';
+      }
+      return switch (error.error.code) {
+        'ACCOUNT_BILLING' => '请检查服务商账户、余额或额度。',
+        'MODEL_CHANNEL_UNAVAILABLE' => '该模型暂无可用渠道，请检查模型服务配置后重试。',
+        'CONTENT_POLICY_VIOLATION' => '请求未通过服务商审核，请调整消息内容后重试。',
+        'AUTH_FAILED' => '请检查API配置后重试。',
+        _ => error.error.message,
+      };
+    }
+    // Completion callbacks carry sanitized hints as strings. Preserve them when
+    // the presentation layer applies this policy again.
+    if (const {
+      '请检查服务商账户、余额或额度。',
+      '该模型暂无可用渠道，请检查模型服务配置后重试。',
+      '请求未通过服务商审核，请调整消息内容后重试。',
+      '请检查API配置后重试。',
+    }.contains(error.toString())) {
+      return error.toString();
+    }
+    if (text.contains('account_billing') || text.contains('服务商账户、余额或额度异常')) {
+      return '请检查服务商账户、余额或额度。';
+    }
+    if (text.contains('无可用渠道') || text.contains('暂无可用渠道')) {
+      return '该模型暂无可用渠道，请检查模型服务配置后重试。';
+    }
+    if (text.contains('未通过服务商审核')) {
+      return '请求未通过服务商审核，请调整消息内容后重试。';
+    }
     if (text.contains('模型服务协议尚未确定')) {
       return 'M006-请重新检测模型能力后重试。';
     }

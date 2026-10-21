@@ -71,6 +71,7 @@ class ProtocolDiagnosis {
     this.sseEventTypes = const [],
     this.errorCode = '',
     this.detail = '',
+    this.providerMessage = '',
     this.finishReason = '',
     this.outputContract = '',
     this.structuredTransport = '',
@@ -79,10 +80,16 @@ class ProtocolDiagnosis {
     this.reasoningLength = 0,
     this.providerId = '',
     this.adapterVersion = 0,
+    this.toolChoiceMode = '',
+    this.toolThinkingMode = '',
+    this.toolProbeVersion = 0,
     this.strictSchemaObserved = false,
     this.stage = '',
     this.attemptCount = 0,
     this.failureCategory = '',
+    this.requestOutcome = '',
+    this.transportErrorType = '',
+    this.parameterStrategy = const {},
   });
 
   /// 实际使用的协议名。
@@ -111,6 +118,7 @@ class ProtocolDiagnosis {
 
   /// 面向用户的中文原因。
   final String detail;
+  final String providerMessage;
   final String finishReason;
   final String outputContract;
   final String structuredTransport;
@@ -119,14 +127,25 @@ class ProtocolDiagnosis {
   final int reasoningLength;
   final String providerId;
   final int adapterVersion;
+
+  /// Runtime capability evidence captured by the tool probe.
+  final String toolChoiceMode;
+  final String toolThinkingMode;
+  final int toolProbeVersion;
   final bool strictSchemaObserved;
   final String stage;
   final int attemptCount;
   final String failureCategory;
 
+  /// not_sent, response_received, or unknown; describes this HTTP attempt.
+  final String requestOutcome;
+  final String transportErrorType;
+  final Map<String, Object?> parameterStrategy;
+
   ProtocolDiagnosis copyWith({
     int? elapsedMs,
     String? detail,
+    String? providerMessage,
     String? errorCode,
     String? finishReason,
     String? outputContract,
@@ -136,10 +155,16 @@ class ProtocolDiagnosis {
     int? reasoningLength,
     String? providerId,
     int? adapterVersion,
+    String? toolChoiceMode,
+    String? toolThinkingMode,
+    int? toolProbeVersion,
     bool? strictSchemaObserved,
     String? stage,
     int? attemptCount,
     String? failureCategory,
+    String? requestOutcome,
+    String? transportErrorType,
+    Map<String, Object?>? parameterStrategy,
   }) => ProtocolDiagnosis(
     protocol: protocol,
     endpoint: endpoint,
@@ -151,6 +176,7 @@ class ProtocolDiagnosis {
     sseEventTypes: sseEventTypes,
     errorCode: errorCode ?? this.errorCode,
     detail: detail ?? this.detail,
+    providerMessage: providerMessage ?? this.providerMessage,
     finishReason: finishReason ?? this.finishReason,
     outputContract: outputContract ?? this.outputContract,
     structuredTransport: structuredTransport ?? this.structuredTransport,
@@ -159,13 +185,20 @@ class ProtocolDiagnosis {
     reasoningLength: reasoningLength ?? this.reasoningLength,
     providerId: providerId ?? this.providerId,
     adapterVersion: adapterVersion ?? this.adapterVersion,
+    toolChoiceMode: toolChoiceMode ?? this.toolChoiceMode,
+    toolThinkingMode: toolThinkingMode ?? this.toolThinkingMode,
+    toolProbeVersion: toolProbeVersion ?? this.toolProbeVersion,
     strictSchemaObserved: strictSchemaObserved ?? this.strictSchemaObserved,
     stage: stage ?? this.stage,
     attemptCount: attemptCount ?? this.attemptCount,
     failureCategory: failureCategory ?? this.failureCategory,
+    requestOutcome: requestOutcome ?? this.requestOutcome,
+    transportErrorType: transportErrorType ?? this.transportErrorType,
+    parameterStrategy: parameterStrategy ?? this.parameterStrategy,
   );
 
   Map<String, Object?> toJson() => {
+    if (parameterStrategy.isNotEmpty) 'request_parameters': parameterStrategy,
     'protocol': protocol,
     'endpoint': endpoint,
     'request_sent': requestSent,
@@ -176,6 +209,7 @@ class ProtocolDiagnosis {
     'sse_event_types': sseEventTypes,
     if (errorCode.isNotEmpty) 'error_code': errorCode,
     if (detail.isNotEmpty) 'detail': detail,
+    if (providerMessage.isNotEmpty) 'safe_provider_message': providerMessage,
     if (finishReason.isNotEmpty) 'finish_reason': finishReason,
     if (outputContract.isNotEmpty) 'output_contract': outputContract,
     if (structuredTransport.isNotEmpty)
@@ -185,9 +219,15 @@ class ProtocolDiagnosis {
     'reasoning_length': reasoningLength,
     if (providerId.isNotEmpty) 'provider_id': providerId,
     if (adapterVersion > 0) 'adapter_version': adapterVersion,
+    if (toolChoiceMode.isNotEmpty) 'tool_choice_mode': toolChoiceMode,
+    if (toolThinkingMode.isNotEmpty) 'tool_thinking_mode': toolThinkingMode,
+    if (toolProbeVersion > 0) 'tool_probe_version': toolProbeVersion,
     'strict_schema_observed': strictSchemaObserved,
     if (stage.isNotEmpty) 'stage': stage,
     if (attemptCount > 0) 'attempt_count': attemptCount,
     if (failureCategory.isNotEmpty) 'failure_category': failureCategory,
+    if (requestOutcome.isNotEmpty) 'request_outcome': requestOutcome,
+    if (transportErrorType.isNotEmpty)
+      'transport_error_type': transportErrorType,
   };
 }

@@ -48,10 +48,17 @@ class ContinuousMessageParser {
 
   /// 是否刚刚看到句末（等待确认下一 segment 是否开始）
   bool _awaitingNextSegment = false;
+  bool _explicitLineBoundary = false;
+  bool _enclosedSentenceEnd = false;
+  final List<String> _enclosures = [];
 
   bool _finished = false;
   bool _htmlLiteralMode = false;
+  String? _fenceCharacter;
+  int _fenceLength = 0;
+  bool _inlineCodeMode = false;
   String _recentInput = '';
+  final StringBuffer _currentLine = StringBuffer();
 
   /// 累积的所有安全正文（用于测试验证）
   final StringBuffer _accumulatedText = StringBuffer();
@@ -63,7 +70,32 @@ class ContinuousMessageParser {
   static const _sentenceEnders = ['。', '！', '？', '…'];
 
   /// 闭合符号（可以紧跟句末标点）
-  static const _closingMarks = ['"', "'", '"', '’', '》', '）', '】', '」', '』'];
+  static const _closingMarks = [
+    '"',
+    "'",
+    '”',
+    '’',
+    '》',
+    '）',
+    ')',
+    '】',
+    ']',
+    '」',
+    '』',
+  ];
+  static const _pairs = {
+    '“': '”',
+    '‘': '’',
+    '「': '」',
+    '『': '』',
+    '（': '）',
+    '(': ')',
+    '【': '】',
+    '[': ']',
+    '《': '》',
+    '"': '"',
+  };
+  static const _continuations = ['，', ',', '、', '：', ':', '；', ';'];
 
   /// 句间空白（不进入下一 segment）
   static bool _isInterSentenceWhitespace(String char) {
@@ -76,98 +108,179 @@ class ContinuousMessageParser {
   /// - TextAppendEvent: 安全正文增量，可立即显示
   /// - SegmentBoundaryEvent: segment 边界，当前消息结束
   List<ParserEvent> feed(String delta) {
-    if (_finished) {
-      return [];
-    }
-
+    if (_finished) return [];
     final events = <ParserEvent>[];
-
-    for (int i = 0; i < delta.length; i++) {
-      final char = delta[i];
-
-      _recentInput = '$_recentInput$char';
-      if (_recentInput.length > 40) {
-        _recentInput = _recentInput.substring(_recentInput.length - 40);
-      }
-      if (!_htmlLiteralMode &&
-          (RegExp(
-                r'```html[ \t]*\r?\n$',
-                caseSensitive: false,
-              ).hasMatch(_recentInput) ||
-              RegExp(
-                r'(?:<html|<!doctype\s+html)$',
-                caseSensitive: false,
-              ).hasMatch(_recentInput))) {
-        _htmlLiteralMode = true;
-      }
-      if (_htmlLiteralMode) {
-        _buffer.write(char);
-        events.add(TextAppendEvent(char));
-        _accumulatedText.write(char);
-        _awaitingNextSegment = false;
-        continue;
-      }
-
-      if (_boundaryCount >= maxSegments - 1) {
-        _buffer.write(char);
-        events.add(TextAppendEvent(char));
-        _accumulatedText.write(char);
-        _awaitingNextSegment = false;
-        continue;
-      }
-
-      if (_awaitingNextSegment) {
-        // 已经看到句末，等待确认下一 segment 是否开始
-
-        if (_isInterSentenceWhitespace(char)) {
-          // 句间空白：忽略，不输出，继续等待
-          continue;
-        } else if (_isSentenceEnder(char) || _closingMarks.contains(char)) {
-          // 连续句末标点或闭合符号：追加到当前 segment
-          _buffer.write(char);
-          events.add(TextAppendEvent(char));
-          _accumulatedText.write(char);
-          // 继续等待（可能还有更多）
-        } else {
-          // 遇到下一句正文：产生 boundary
-          events.add(SegmentBoundaryEvent());
-          _boundaryCount++;
-          _awaitingNextSegment = false;
-          _buffer.clear();
-
-          // 输出当前字符（新 segment 的开始）
-          _buffer.write(char);
-          events.add(TextAppendEvent(char));
-          _accumulatedText.write(char);
-        }
-      } else {
-        // 正常积累文本
-        if (char == '\n' || char == '\r') {
-          // 主动换行：等待下一份正文时产生 boundary。
-          // 连续换行由 awaiting 分支当作句间空白忽略，不产生空 segment。
-          if (_buffer.length > 0) {
-            _awaitingNextSegment = true;
-          }
-          continue;
-        }
-
-        _buffer.write(char);
-        events.add(TextAppendEvent(char));
-        _accumulatedText.write(char);
-
-        // 检查是否是句末标点
-        if (_isSentenceEnder(char) && _boundaryCount < maxSegments - 1) {
-          _awaitingNextSegment = true;
-        }
-      }
+    for (var index = 0; index < delta.length; index++) {
+      _consumeCharacter(delta[index], events);
     }
-
     return events;
+  }
+
+  void _consumeCharacter(String char, List<ParserEvent> events) {
+    _currentLine.write(char);
+    _trackRecentInput(char);
+    final wasFenced = _fenceCharacter != null;
+    final restoreOpeningCarriageReturn = _openFenceIfNeeded(
+      char,
+      wasFenced: wasFenced,
+    );
+    if (_htmlLiteralMode || _fenceCharacter != null) {
+      _consumeProtectedCharacter(
+        char,
+        events,
+        wasFenced: wasFenced,
+        restoreOpeningCarriageReturn: restoreOpeningCarriageReturn,
+      );
+      return;
+    }
+    _consumePlainCharacter(char, events);
+  }
+
+  void _trackRecentInput(String char) {
+    _recentInput = '$_recentInput$char';
+    if (_recentInput.length > 40) {
+      _recentInput = _recentInput.substring(_recentInput.length - 40);
+    }
+    if (_htmlLiteralMode) return;
+    final opensHtmlFence = RegExp(
+      r'```html[ \t]*\r?\n$',
+      caseSensitive: false,
+    ).hasMatch(_recentInput);
+    final opensHtmlDocument = RegExp(
+      r'(?:<html|<!doctype\s+html)$',
+      caseSensitive: false,
+    ).hasMatch(_recentInput);
+    if (opensHtmlFence || opensHtmlDocument) _htmlLiteralMode = true;
+  }
+
+  bool _openFenceIfNeeded(String char, {required bool wasFenced}) {
+    if (wasFenced || char != '\n') return false;
+    final opening = RegExp(
+      r'^\s{0,3}(`{3,}|~{3,})[^\r\n]*\r?\n?$',
+    ).firstMatch(_currentLine.toString());
+    if (opening == null) return false;
+    final fence = opening.group(1)!;
+    _fenceCharacter = fence[0];
+    _fenceLength = fence.length;
+    _inlineCodeMode = false;
+    return _currentLine.toString().endsWith('\r\n');
+  }
+
+  void _consumeProtectedCharacter(
+    String char,
+    List<ParserEvent> events, {
+    required bool wasFenced,
+    required bool restoreOpeningCarriageReturn,
+  }) {
+    if (restoreOpeningCarriageReturn) _appendVisible('\r', events);
+    _appendVisible(char, events);
+    _awaitingNextSegment = false;
+    if (wasFenced && char == '\n' && _isClosingFenceLine()) {
+      _fenceCharacter = null;
+      _fenceLength = 0;
+      _awaitingNextSegment = _buffer.length > 0;
+    }
+    if (char == '\n') _currentLine.clear();
+  }
+
+  void _consumePlainCharacter(String char, List<ParserEvent> events) {
+    if (char == '`') {
+      _inlineCodeMode = !_inlineCodeMode;
+      _appendVisible(char, events);
+      _awaitingNextSegment = false;
+      return;
+    }
+    if (_inlineCodeMode || _boundaryCount >= maxSegments - 1) {
+      _appendVisible(char, events);
+      _awaitingNextSegment = false;
+      if (char == '\n') _currentLine.clear();
+      return;
+    }
+    final closedEnclosure = _trackEnclosure(char);
+    if (_awaitingNextSegment) {
+      if (!_explicitLineBoundary && _continuations.contains(char)) {
+        _awaitingNextSegment = false;
+        _enclosedSentenceEnd = false;
+        _appendVisible(char, events);
+        return;
+      }
+      _consumeAwaitingCharacter(char, events);
+      return;
+    }
+    _consumeCurrentSegmentCharacter(char, events, closedEnclosure);
+  }
+
+  bool _trackEnclosure(String char) {
+    if (_enclosures.isNotEmpty && _enclosures.last == char) {
+      _enclosures.removeLast();
+      return true;
+    }
+    if (_pairs[char] case final closing?) _enclosures.add(closing);
+    return false;
+  }
+
+  void _consumeAwaitingCharacter(String char, List<ParserEvent> events) {
+    if (_isInterSentenceWhitespace(char)) {
+      if (char == '\n') _currentLine.clear();
+      return;
+    }
+    if (_isSentenceEnder(char) || _closingMarks.contains(char)) {
+      _appendVisible(char, events);
+      return;
+    }
+    events.add(SegmentBoundaryEvent());
+    _boundaryCount++;
+    _awaitingNextSegment = false;
+    _explicitLineBoundary = false;
+    _enclosedSentenceEnd = false;
+    _buffer.clear();
+    _appendVisible(char, events);
+  }
+
+  void _consumeCurrentSegmentCharacter(
+    String char,
+    List<ParserEvent> events,
+    bool closedEnclosure,
+  ) {
+    if (char == '\n' || char == '\r') {
+      if (_buffer.length > 0) {
+        _awaitingNextSegment = true;
+        _explicitLineBoundary = true;
+      }
+      if (char == '\n') _currentLine.clear();
+      return;
+    }
+    _appendVisible(char, events);
+    if (_isSentenceEnder(char) && _boundaryCount < maxSegments - 1) {
+      _enclosedSentenceEnd = _enclosures.isNotEmpty;
+      _awaitingNextSegment = !_enclosedSentenceEnd;
+      _explicitLineBoundary = false;
+    } else if (closedEnclosure && _enclosedSentenceEnd) {
+      if (_enclosures.isEmpty) _awaitingNextSegment = true;
+    } else {
+      _enclosedSentenceEnd = false;
+    }
+    if (char == '\n') _currentLine.clear();
+  }
+
+  void _appendVisible(String char, List<ParserEvent> events) {
+    _buffer.write(char);
+    events.add(TextAppendEvent(char));
+    _accumulatedText.write(char);
   }
 
   /// 判断是否是句末标点
   bool _isSentenceEnder(String char) {
     return _sentenceEnders.contains(char);
+  }
+
+  bool _isClosingFenceLine() {
+    final marker = _fenceCharacter;
+    if (marker == null) return false;
+    final line = _currentLine.toString().trim();
+    return RegExp(
+      '^${RegExp.escape(marker)}{$_fenceLength,}\\s*\$',
+    ).hasMatch(line);
   }
 
   /// 结束流

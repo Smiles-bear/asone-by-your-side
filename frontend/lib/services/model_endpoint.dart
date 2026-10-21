@@ -52,3 +52,24 @@ bool isGeminiModel(String modelId) => modelId
     .replaceFirst(RegExp(r'^models/'), '')
     .toLowerCase()
     .startsWith('gemini-');
+
+List<String> modelProtocolCandidates({
+  required String baseUrl,
+  required String modelId,
+  String preference = ProtocolType.auto,
+}) {
+  if (!ProtocolType.isValid(preference)) {
+    throw const ModelEndpointException('请选择有效的接口协议');
+  }
+  if (preference != ProtocolType.auto) return [preference];
+  final path = Uri.parse(normalizeModelBaseUrl(baseUrl)).path;
+  final candidates = List<String>.of(ProtocolType.autoCandidates);
+  if (path.endsWith('/v1beta')) {
+    candidates.remove(ProtocolType.gemini);
+    candidates.insert(0, ProtocolType.gemini);
+  } else if (!path.endsWith('/v1') && isGeminiModel(modelId)) {
+    candidates.remove(ProtocolType.gemini);
+    candidates.insert(1, ProtocolType.gemini);
+  }
+  return candidates;
+}

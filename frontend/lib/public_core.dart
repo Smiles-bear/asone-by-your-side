@@ -3,6 +3,7 @@ import 'package:asone_demo_core/asone_demo_core.dart';
 import 'package:dio/dio.dart';
 import 'local_core/core_database.dart';
 import 'local_core/core_repository.dart';
+import 'local_core/memory/memory_store.dart';
 import 'local_core/chat/local_chat_service.dart';
 import 'local_core/feature_unread_service.dart';
 import 'local_core/group_chat/group_message_repository.dart';
@@ -13,6 +14,7 @@ import 'local_core/token_usage_service.dart';
 import 'services/model_discovery_service.dart';
 
 import 'community_open_core.dart';
+import 'community_memory_service.dart';
 import 'community_chat_context_compiler.dart';
 import 'community_group_context_builder.dart';
 import 'community_group_round_engine.dart';
@@ -31,7 +33,12 @@ class PublicCore implements OpenCore {
     : database = database ?? CoreDatabase.instance,
       compatibilityFallback = fallback {
     repository = CoreRepository(coreDatabase: this.database);
-    chatContext = CommunityChatContextCompiler(repository: repository);
+    memories = MemoryStore(coreDatabase: this.database);
+    memory = CommunityMemoryService(repository: repository, store: memories);
+    chatContext = CommunityChatContextCompiler(
+      repository: repository,
+      memories: memories,
+    );
     chat = LocalChatService(
       coreDatabase: this.database,
       coreRepository: repository,
@@ -86,6 +93,8 @@ class PublicCore implements OpenCore {
   /// 仅为旧版测试/调用方保留的构造参数；社区功能不再读取演示仓储。
   final DemoCore? compatibilityFallback;
   late final CoreRepository repository;
+  late final MemoryStore memories;
+  late final CommunityMemoryService memory;
   late final CommunityChatContextCompiler chatContext;
   late final LocalChatService chat;
   @override

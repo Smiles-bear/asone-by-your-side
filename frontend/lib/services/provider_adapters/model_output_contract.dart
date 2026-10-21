@@ -99,6 +99,7 @@ class ModelCapabilityProfile {
     this.adapterVersion = 0,
     this.configurationFingerprint = '',
     this.verifiedStructuredTransports = const {},
+    this.parameterStrategy = const {},
   });
 
   final String structuredVerdict;
@@ -111,13 +112,13 @@ class ModelCapabilityProfile {
   final int adapterVersion;
   final String configurationFingerprint;
   final Set<StructuredOutputTransport> verifiedStructuredTransports;
+  final Map<String, Object?> parameterStrategy;
 
   bool get hasReliableTextOutput => textVerdict == 'supported';
 
   bool get hasReliableStructuredOutput =>
       structuredVerdict == 'supported' &&
-      structuredTransport != StructuredOutputTransport.unknown &&
-      structuredTransport != StructuredOutputTransport.promptJson;
+      structuredTransport != StructuredOutputTransport.unknown;
 
   static ModelCapabilityProfile fromRows(
     List<Map<String, Object?>> rows, {
@@ -130,6 +131,35 @@ class ModelCapabilityProfile {
       (row) => row['capability'] == 'structured_output',
     );
     final textRows = rows.where((row) => row['capability'] == 'text_chat');
+    Map<String, Object?> parameterStrategy = const {};
+    final parameterRows =
+        rows.where((row) => row['verdict'] == 'supported').toList()..sort(
+          (a, b) => (b['tested_at']?.toString() ?? '').compareTo(
+            a['tested_at']?.toString() ?? '',
+          ),
+        );
+    for (final row in parameterRows) {
+      final fingerprint = row['configuration_fingerprint'];
+      if (fingerprint is! String ||
+          fingerprint.isEmpty ||
+          configurationFingerprint.isEmpty ||
+          fingerprint != configurationFingerprint) {
+        continue;
+      }
+      try {
+        final evidence = jsonDecode(row['diagnosis_json'] as String? ?? '{}');
+        if (evidence is Map &&
+            evidence['protocol'] == protocol &&
+            evidence['request_parameters'] is Map) {
+          parameterStrategy = Map<String, Object?>.from(
+            evidence['request_parameters'] as Map,
+          );
+          break;
+        }
+      } catch (_) {
+        // Missing parameter evidence never invalidates historical capabilities.
+      }
+    }
     final textVerdict = textRows.isEmpty
         ? 'unconfirmed'
         : textRows.first['verdict'] as String? ?? 'unconfirmed';
@@ -140,6 +170,7 @@ class ModelCapabilityProfile {
         protocol: protocol,
         adapterVersion: adapterVersion,
         configurationFingerprint: configurationFingerprint,
+        parameterStrategy: parameterStrategy,
       );
     }
     final row = structured.first;
@@ -159,10 +190,11 @@ class ModelCapabilityProfile {
     final observedProvider = diagnosis['provider_id'] as String? ?? providerId;
     final observedVersion =
         diagnosis['adapter_version'] as int? ?? adapterVersion;
+    final legacy = diagnosis['structured_probe_version'] == null;
     final transport = _transportFrom(
       diagnosis['structured_transport'] as String?,
-      detail: detail,
-      protocol: observedProtocol,
+      detail: legacy ? detail : '',
+      protocol: legacy ? observedProtocol : '',
     );
     final transports = <StructuredOutputTransport>{};
     final recordedTransports = diagnosis['structured_transports'];
@@ -171,7 +203,7 @@ class ModelCapabilityProfile {
         final parsed = _transportFrom(
           raw?.toString(),
           detail: '',
-          protocol: observedProtocol,
+          protocol: '',
         );
         if (parsed != StructuredOutputTransport.unknown) {
           transports.add(parsed);
@@ -187,7 +219,9 @@ class ModelCapabilityProfile {
       structuredTransport: transport,
       strictSchemaObserved:
           diagnosis['strict_schema_observed'] == true ||
-          (transport == StructuredOutputTransport.jsonSchema &&
+          (legacy &&
+              !diagnosis.containsKey('strict_schema_observed') &&
+              transport == StructuredOutputTransport.jsonSchema &&
               !detail.contains('JSON Object')),
       reasoningControl: diagnosis['reasoning_control'] as String? ?? 'unknown',
       providerId: observedProvider,
@@ -195,6 +229,7 @@ class ModelCapabilityProfile {
       adapterVersion: observedVersion,
       configurationFingerprint: configurationFingerprint,
       verifiedStructuredTransports: transports,
+      parameterStrategy: parameterStrategy,
     );
   }
 
@@ -229,16 +264,11 @@ class ModelCapabilityProfile {
   }
 }
 
-StructuredOutputTransport selectStructuredOutputTransport({
-  required ModelCapabilityProfile profile,
-  required String protocol,
-  required ModelOutputContract contract,
-}) {
-  final allowed = contract.allowedStructuredTransports;
-  final verified = profile.verifiedStructuredTransports.isNotEmpty
-      ? profile.verifiedStructuredTransports
-      : {if (profile.hasReliableStructuredOutput) profile.structuredTransport};
-  final nativePriority = switch (protocol) {
+/// The same registered channels are used by production and capability probes.
+List<StructuredOutputTransport> structuredOutputTransportCandidates(
+  String protocol,
+) => [
+  ...switch (protocol) {
     'openai_chat' => const [
       StructuredOutputTransport.jsonSchema,
       StructuredOutputTransport.jsonObject,
@@ -248,9 +278,23 @@ StructuredOutputTransport selectStructuredOutputTransport({
     'anthropic_messages' => const [StructuredOutputTransport.forcedTool],
     'gemini' => const [StructuredOutputTransport.geminiSchema],
     _ => const <StructuredOutputTransport>[],
-  };
-  for (final transport in nativePriority) {
-    if (allowed.contains(transport) && verified.contains(transport)) {
+  },
+  StructuredOutputTransport.promptJson,
+];
+
+StructuredOutputTransport selectStructuredOutputTransport({
+  required ModelCapabilityProfile profile,
+  required String protocol,
+  required ModelOutputContract contract,
+}) {
+  final allowed = contract.allowedStructuredTransports;
+  final verified = profile.verifiedStructuredTransports.isNotEmpty
+      ? profile.verifiedStructuredTransports
+      : {if (profile.hasReliableStructuredOutput) profile.structuredTransport};
+  for (final transport in structuredOutputTransportCandidates(protocol)) {
+    if (profile.structuredVerdict == 'supported' &&
+        allowed.contains(transport) &&
+        verified.contains(transport)) {
       return transport;
     }
   }
@@ -265,17 +309,24 @@ List<Map<String, Object?>> messagesForStructuredTransport(
   List<Map<String, Object?>> messages, {
   required ModelOutputContract contract,
   required StructuredOutputTransport transport,
+  bool schemaAlreadyIncluded = false,
+  String? exampleJson,
 }) {
   if (transport != StructuredOutputTransport.promptJson &&
       transport != StructuredOutputTransport.jsonObject) {
     return messages;
   }
-  final instruction =
-      '只输出一个完整 JSON 值，不要使用 Markdown 围栏或附加说明。'
-      '结果必须满足以下 JSON Schema：${jsonEncode(contract.schema)}';
+  final instruction = schemaAlreadyIncluded
+      ? '本轮只输出满足前述JSON Schema的一个完整JSON对象。'
+      : '只输出一个完整 JSON 值，不要使用 Markdown 围栏或附加说明。'
+            '结果必须满足以下 JSON Schema：${jsonEncode(contract.schema)}';
   return [
     ...messages,
-    {'role': 'system', 'content': instruction},
+    {
+      'role': 'system',
+      'content':
+          '$instruction${exampleJson == null ? '' : '格式示例：$exampleJson。'}',
+    },
   ];
 }
 
@@ -295,22 +346,13 @@ void applyOutputContractPolicy(
       } else if (providerId == 'deepseek') {
         payload['thinking'] = <String, Object?>{'type': 'disabled'};
         payload.remove('reasoning_effort');
-      } else {
-        payload['reasoning_effort'] = 'low';
       }
       break;
     case 'openai_responses':
-      payload['reasoning'] = <String, Object?>{'effort': 'low'};
-      break;
     case 'anthropic_messages':
-      final outputConfig = Map<String, Object?>.from(
-        payload['output_config'] as Map? ?? const {},
-      );
-      outputConfig['effort'] = 'low';
-      payload['output_config'] = outputConfig;
-      break;
     case 'gemini':
-      // Gemini 思考参数随模型族变化；没有可靠能力证据时不注入未知字段。
+      // A task preference is not proof that this endpoint/model implements a
+      // provider-specific knob. Explicit verified overrides remain untouched.
       break;
   }
 }

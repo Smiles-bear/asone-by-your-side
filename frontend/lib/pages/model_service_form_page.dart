@@ -23,6 +23,7 @@ import '../widgets/asone_dialog.dart';
 import '../widgets/asone_feedback.dart';
 import '../widgets/asone_icons.dart';
 import '../widgets/asone_surface.dart';
+import '../widgets/model_protocol_preference_field.dart';
 
 class ModelServiceFormPage extends StatefulWidget {
   final ModelService? service;
@@ -194,7 +195,7 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
         models = await _discovery.discoverModelsWithCredentials(
           baseUrl: baseUrl,
           apiKey: apiKey,
-          protocolType: provider?.protocol ?? _selectedProtocol,
+          protocolType: _selectedProtocol,
         );
       }
       _baseUrlController.text = baseUrl;
@@ -553,6 +554,13 @@ class _ModelServiceFormPageState extends State<ModelServiceFormPage> {
                   }
                   return null;
                 },
+              ),
+              ModelProtocolPreferenceField(
+                value: _selectedProtocol,
+                onChanged: (value) => setState(() {
+                  _selectedProtocol = value;
+                  _capabilityVerdicts = const {};
+                }),
               ),
               const SizedBox(height: 16),
               TextFormField(

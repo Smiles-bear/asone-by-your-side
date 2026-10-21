@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'adapter_types.dart';
 import 'adapter_helpers.dart';
 import 'model_output_contract.dart';
+import 'endpoint_output_policy.dart';
 
 /// 协议适配器抽象接口。
 ///
@@ -54,6 +55,41 @@ abstract class ModelProtocolAdapter {
   /// Callers should only use this when the payload already contains tools.
   Map<String, Object?> requireAnyToolPayload(Map<String, Object?> payload);
 
+  /// Completes an already chosen operation, without generating public prose.
+  /// Uses the same provider reasoning policy as other short mechanical tasks.
+  Map<String, Object?> requiredToolContinuationOverrides(
+    String modelId, {
+    required String baseUrl,
+    String? providerId,
+    int? maxTokens,
+  }) {
+    const contract = ModelOutputContract.shortScalar();
+    final payload = outputContractPayload(
+      modelId,
+      const [],
+      contract,
+      structuredTransport: StructuredOutputTransport.unknown,
+      providerId: providerId,
+      maxTokens: maxTokens,
+    );
+    applyEndpointPolicy(payload, baseUrl, protocolType, contract);
+    payload.removeWhere(
+      (key, _) => const {
+        'model',
+        'messages',
+        'input',
+        'contents',
+        'system',
+        'tools',
+        'stream',
+        'max_tokens',
+        'max_completion_tokens',
+        'temperature',
+      }.contains(key),
+    );
+    return requireAnyToolPayload(payload);
+  }
+
   /// 从非流式响应提取文本（空字符串表示无可读文本）。
   String extractText(Map<dynamic, dynamic> payload);
 
@@ -64,11 +100,19 @@ abstract class ModelProtocolAdapter {
   List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) =>
       const [];
 
+  /// 保留本次助手输出中下一步必须原样回传的协议原生块。
+  Map<String, Object?>? extractNativeContinuation(
+    Map<dynamic, dynamic> payload,
+  ) => null;
+
   /// 从一个 SSE 帧提取文本增量。
   String streamTextFromFrame(SseFrame frame);
 
   /// 从一个 SSE 帧提取正文，并声明上游返回的是增量还是累计全文。
-  /// 默认协议按增量处理；只有协议字段明确表达累计全文时才应覆写。
+  ///
+  /// 大多数标准协议都返回增量，因此默认沿用 [streamTextFromFrame]。
+  /// 只有能从协议字段明确识别累计全文的适配器才要覆写，不得通过
+  /// 内容相似度猜测。
   ProviderStreamTextChunk streamTextChunkFromFrame(SseFrame frame) =>
       ProviderStreamTextChunk.incremental(streamTextFromFrame(frame));
 
@@ -78,6 +122,10 @@ abstract class ModelProtocolAdapter {
   /// 从 SSE 流中提取工具调用（累积所有帧后调用）。
   List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) =>
       const [];
+
+  Map<String, Object?>? streamExtractNativeContinuation(
+    List<SseFrame> frames,
+  ) => null;
 
   /// 判断一个协议帧是否明确结束当前 HTTP 流。
   ProviderStreamTerminal streamTerminalFromFrame(SseFrame frame) =>
@@ -123,6 +171,7 @@ abstract class ModelProtocolAdapter {
     String toolName,
     String instruction, {
     String? providerId,
+    String expectedCode = 'AZ731',
   });
 
   /// 构造结构化输出探针请求体。
@@ -166,7 +215,10 @@ class ProviderStreamTextChunk {
   final ProviderStreamTextKind kind;
 }
 
-/// 将协议明确标记的累计全文转换为可展示增量，避免重复拼接。
+/// 把协议已明确标记的增量/累计全文统一转为可展示增量。
+///
+/// 累计全文只接受严格前缀续接。如果上游在同一次响应中改写了已接收正文，
+/// 宁可保留已收到内容并按协议异常收口，也不重复拼接或猜测删字。
 class ProviderStreamTextAccumulator {
   String _text = '';
 

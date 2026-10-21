@@ -14,6 +14,9 @@ import '../../services/provider_adapters/gemini_adapter.dart';
 import '../../services/provider_adapters/incremental_sse_decoder.dart';
 import '../../services/provider_adapters/model_protocol_adapter.dart';
 import '../../services/provider_adapters/model_output_length_failure.dart';
+import '../../services/provider_adapters/provider_response_aggregation.dart';
+import '../../services/provider_adapters/model_parameter_policy.dart';
+import '../../services/provider_adapters/provider_usage.dart';
 import '../../services/provider_adapters/protocol_context_recorder.dart';
 import '../../services/provider_adapters/protocol_types.dart';
 import '../../services/provider_adapters/upstream_failure_policy.dart';
@@ -1344,7 +1347,11 @@ class LocalChatService {
         tag: 'LocalChat',
         details: error.toString(),
       );
-      onDone(error: error.toString());
+      onDone(
+        error: error is AdapterRequestException
+            ? UserFacingErrorPolicy.failureHintFor(error)
+            : error.toString(),
+      );
     }
   }
 
@@ -1467,12 +1474,19 @@ class LocalChatService {
       tools: tools,
     );
     payload.addAll(payloadOverrides);
+    final parameterPolicy = ModelParameterPolicy.forEndpoint(
+      baseUrl: base,
+      modelId: model,
+      protocol: adapter.protocolType,
+      apiKey: apiKey,
+    );
     applyModelRequestPolicy(
       payload,
       baseUrl: base,
       modelId: model,
       protocolType: adapter.protocolType,
       directResponse: false,
+      apiKey: apiKey,
     );
 
     final endpoints = adapter is GeminiAdapter
@@ -1481,52 +1495,70 @@ class LocalChatService {
 
     Response<ResponseBody>? response;
     String? usedEndpoint;
+    endpointLoop:
     for (final endpoint in endpoints) {
-      try {
-        response = await _dio.post<ResponseBody>(
-          endpoint,
-          data: payload,
-          options: Options(
-            responseType: ResponseType.stream,
-            headers: headers,
-            validateStatus: (_) => true,
-          ),
-          cancelToken: cancelToken,
-        );
-        usedEndpoint = endpoint;
-        final status = response.statusCode ?? 0;
-        if (status < 200 || status >= 300) {
-          final providerError = await _readProviderError(
-            response.data,
-            apiKey: apiKey,
+      for (var parameterAttempt = 0; parameterAttempt < 2; parameterAttempt++) {
+        try {
+          response = await _dio.post<ResponseBody>(
+            endpoint,
+            data: payload,
+            options: Options(
+              responseType: ResponseType.stream,
+              headers: headers,
+              validateStatus: (_) => true,
+            ),
+            cancelToken: cancelToken,
           );
+          usedEndpoint = endpoint;
+          final status = response.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            final providerError = await _readProviderError(
+              response.data,
+              apiKey: apiKey,
+            );
+            if (parameterAttempt == 0 &&
+                parameterPolicy.adjustAfterRejection(
+                  statusCode: status,
+                  response: providerError,
+                  payload: payload,
+                )) {
+              continue;
+            }
+            if (status == 404 &&
+                endpoints.indexOf(endpoint) < endpoints.length - 1) {
+              continue endpointLoop;
+            }
+            final failure = normalizeHttpError(status, {
+              'error': {'message': providerError},
+            }, '');
+            UpstreamFailurePolicy.throwIfTransientHttp(
+              status,
+              code: failure.code,
+              providerMessage: failure.providerMessage,
+            );
+            throw AdapterRequestException(failure);
+          }
+          parameterPolicy.rememberSuccess(payload);
+          break endpointLoop;
+        } on DioException catch (error) {
+          if (CancelToken.isCancel(error)) {
+            throw StateError('已取消');
+          }
+          final status = error.response?.statusCode;
           if (status == 404 &&
               endpoints.indexOf(endpoint) < endpoints.length - 1) {
-            continue;
+            continue endpointLoop;
           }
           UpstreamFailurePolicy.throwIfTransientHttp(status);
-          final detail = providerError.isEmpty ? '' : '：$providerError';
-          throw StateError('模型服务返回 HTTP $status$detail');
+          throw StateError('网络错误: ${error.message ?? error}');
         }
-        break;
-      } on DioException catch (error) {
-        if (CancelToken.isCancel(error)) {
-          throw StateError('已取消');
-        }
-        final status = error.response?.statusCode;
-        if (status == 404 &&
-            endpoints.indexOf(endpoint) < endpoints.length - 1) {
-          continue;
-        }
-        UpstreamFailurePolicy.throwIfTransientHttp(status);
-        throw StateError('网络错误: ${error.message ?? error}');
       }
     }
 
     final stream = response?.data?.stream;
     if (stream == null) throw StateError('响应流为空');
 
-    final textAccumulator = ProviderStreamTextAccumulator();
+    final responseAccumulator = ProviderResultAggregator(adapter: adapter);
     final reasoningBuffer = StringBuffer();
     var lastEventType = '';
     late final IncrementalSseResult decoded;
@@ -1543,13 +1575,12 @@ class LocalChatService {
           lastEventType = frame.eventType.isNotEmpty
               ? frame.eventType
               : frame.data['type']?.toString() ?? lastEventType;
-          final text = textAccumulator.add(
-            adapter.streamTextChunkFromFrame(frame),
-          );
+          final event = responseAccumulator.addFrame(frame);
+          final text = event.textDelta;
           if (text.isNotEmpty) {
             onDelta(text);
           }
-          final reasoning = adapter.streamReasoningFromFrame(frame);
+          final reasoning = event.reasoningDelta;
           if (reasoning.isNotEmpty) {
             reasoningBuffer.write(reasoning);
             onReasoningDelta?.call(reasoning);
@@ -1568,7 +1599,7 @@ class LocalChatService {
             'Last event: $lastEventType\n'
             'Error type: ${error.runtimeType}\n'
             'Elapsed: ${watch.elapsedMilliseconds}ms\n'
-            'Has content: ${textAccumulator.text.isNotEmpty}',
+            'Has content: ${responseAccumulator.text.isNotEmpty}',
       );
       throw StateError('流式传输中断');
     }
@@ -1590,22 +1621,25 @@ class LocalChatService {
             'Last event: $lastEventType\n'
             'Termination: $terminationReason\n'
             'Elapsed: ${watch.elapsedMilliseconds}ms\n'
-            'Has content: ${textAccumulator.text.isNotEmpty}',
+            'Has content: ${responseAccumulator.text.isNotEmpty}',
       );
       final toolCalls = adapter.streamExtractToolCalls(decoded.frames);
       UpstreamFailurePolicy.throwIfTransientStream(
         reason: terminationReason,
-        hasVisibleText: textAccumulator.text.trim().isNotEmpty,
+        hasVisibleText: responseAccumulator.text.trim().isNotEmpty,
         hasVisibleReasoning: reasoningBuffer.toString().trim().isNotEmpty,
         hasToolCalls: toolCalls.isNotEmpty,
       );
       if (terminationReason == 'finish_reason:length') {
         throw ModelOutputLengthFailure(
           outputLimit: maxTokens,
-          outputTokens: _extractStreamUsage(decoded.frames)?['output_tokens'],
-          textLength: textAccumulator.text.length,
+          outputTokens: ProviderUsage.fromFrames(
+            decoded.frames,
+            protocol: adapter.protocolType,
+          )['completion_tokens'],
+          textLength: responseAccumulator.text.length,
           reasoningLength: reasoningBuffer.length,
-          hasVisibleText: textAccumulator.text.trim().isNotEmpty,
+          hasVisibleText: responseAccumulator.text.trim().isNotEmpty,
           hasToolCalls: toolCalls.isNotEmpty,
         );
       }
@@ -1621,65 +1655,30 @@ class LocalChatService {
           'Last event: $lastEventType\n'
           'Termination: $terminationReason\n'
           'Elapsed: ${watch.elapsedMilliseconds}ms\n'
-          'Text length: ${textAccumulator.text.length}',
+          'Text length: ${responseAccumulator.text.length}',
     );
 
     // 从流中提取工具调用
-    final toolCalls = adapter.streamExtractToolCalls(decoded.frames);
-
-    final usage = _extractStreamUsage(decoded.frames);
+    final aggregated = responseAccumulator.finish(terminal: decoded.terminal);
+    if (aggregated.parsingIssues.isNotEmpty) {
+      throw StateError('模型返回异常：${aggregated.parsingIssues.join(', ')}');
+    }
+    final toolCalls = aggregated.toolCalls;
+    final usage = aggregated.usage.isEmpty
+        ? null
+        : <String, int>{
+            if (aggregated.usage['prompt_tokens'] case final input?)
+              'input_tokens': input,
+            if (aggregated.usage['completion_tokens'] case final output?)
+              'output_tokens': output,
+          };
 
     return (
-      text: textAccumulator.text,
+      text: aggregated.text,
       reasoning: reasoningBuffer.toString(),
       toolCalls: toolCalls,
       usage: usage,
       terminationReason: terminationReason,
     );
-  }
-
-  Map<String, int>? _extractStreamUsage(List<SseFrame> frames) {
-    var input = 0;
-    var output = 0;
-    var found = false;
-
-    void readUsage(Object? raw) {
-      if (raw is! Map) return;
-      int number(Object? value) => value is num ? value.toInt() : 0;
-      final currentInput = number(
-        raw['prompt_tokens'] ??
-            raw['input_tokens'] ??
-            raw['promptTokenCount'] ??
-            raw['inputTokenCount'],
-      );
-      final currentOutput = number(
-        raw['completion_tokens'] ??
-            raw['output_tokens'] ??
-            raw['candidatesTokenCount'] ??
-            raw['outputTokenCount'],
-      );
-      if (currentInput > 0 ||
-          currentOutput > 0 ||
-          raw['total_tokens'] != null ||
-          raw['totalTokenCount'] != null) {
-        found = true;
-        input = math.max(input, currentInput);
-        output = math.max(output, currentOutput);
-      }
-    }
-
-    for (final frame in frames) {
-      final data = frame.data;
-      readUsage(data['usage']);
-      readUsage(data['usageMetadata']);
-      readUsage(data);
-      final response = data['response'];
-      if (response is Map) readUsage(response['usage']);
-      final message = data['message'];
-      if (message is Map) readUsage(message['usage']);
-    }
-    return found
-        ? <String, int>{'input_tokens': input, 'output_tokens': output}
-        : null;
   }
 }

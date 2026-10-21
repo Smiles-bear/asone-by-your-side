@@ -33,6 +33,7 @@ class CommunityGroupContextBuilder {
     final turn = await _chatContext.compileTurnContext(
       conversationId: conversationId,
       query: request.triggerMessage?.content ?? '',
+      includeMemories: false,
     );
     final history = await _messages.listMessages(
       request.roomId,

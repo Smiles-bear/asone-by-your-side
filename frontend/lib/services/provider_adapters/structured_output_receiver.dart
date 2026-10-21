@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'tool_argument_parser.dart';
 
 enum ModelTaskFailureKind {
   none,
@@ -46,7 +47,7 @@ StructuredOutputReception receiveStructuredOutput({
         validationIssues: const ['模型没有返回可读取的结构化内容'],
       );
     }
-    extracted = extractSingleJsonValue(source);
+    extracted = extractSingleJsonValue(source, schema: schema);
     if (extracted.isEmpty) {
       return StructuredOutputReception(
         success: false,
@@ -57,7 +58,7 @@ StructuredOutputReception receiveStructuredOutput({
       );
     }
     try {
-      decoded = jsonDecode(extracted);
+      decoded = decodeStrictProviderJson(extracted);
     } catch (_) {
       return StructuredOutputReception(
         success: false,
@@ -94,8 +95,9 @@ StructuredOutputReception receiveStructuredOutput({
   );
 }
 
-String extractSingleJsonValue(String source) {
+String extractSingleJsonValue(String source, {Map<String, Object?>? schema}) {
   final text = _stripOuterFence(source.trim());
+  final candidates = <String>[];
   for (var start = 0; start < text.length; start++) {
     final opening = text.codeUnitAt(start);
     if (opening != 0x7b && opening != 0x5b) continue;
@@ -103,12 +105,22 @@ String extractSingleJsonValue(String source) {
     if (candidate == null) continue;
     try {
       jsonDecode(candidate);
-      return candidate;
+      candidates.add(candidate);
+      start += candidate.length - 1;
     } catch (_) {
       // Continue searching in case prose contained a brace before the payload.
     }
   }
-  return '';
+  if (candidates.length == 1) return candidates.single;
+  if (schema == null) return candidates.firstOrNull ?? '';
+  final matching = candidates.where((candidate) {
+    final normalized = _normalizeValue(jsonDecode(candidate), schema, r'$', []);
+    final issues = <String>[];
+    _collectSchemaIssues(normalized, schema, r'$', issues);
+    return issues.isEmpty;
+  }).toList();
+  // Multiple valid payloads are ambiguous; never choose a convenient result.
+  return matching.length == 1 ? matching.single : '';
 }
 
 String _stripOuterFence(String text) {
@@ -206,6 +218,15 @@ Object? _normalizeObject(
   String path,
   List<String> notes,
 ) {
+  if (value is List && value.length == 1 && value.single is Map) {
+    final candidate = _normalizeObject(value.single, schema, path, notes);
+    final issues = <String>[];
+    _collectSchemaIssues(candidate, schema, path, issues);
+    if (issues.isEmpty) {
+      notes.add('$path: 单元素对象数组已解包并校验');
+      return candidate;
+    }
+  }
   if (value is! Map) return value;
   final properties = (schema['properties'] as Map? ?? const {}).map(
     (key, item) => MapEntry(key.toString(), item),

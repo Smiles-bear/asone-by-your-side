@@ -15,8 +15,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _ScriptedChatAdapter implements HttpClientAdapter {
-  _ScriptedChatAdapter(this.responses);
+  _ScriptedChatAdapter(this.responses, {this.statuses = const []});
   final List<String> responses;
+  final List<int> statuses;
   final requests = <Map<String, Object?>>[];
 
   @override
@@ -28,7 +29,9 @@ class _ScriptedChatAdapter implements HttpClientAdapter {
     requests.add(Map<String, Object?>.from(options.data as Map));
     return ResponseBody.fromString(
       responses[(requests.length - 1).clamp(0, responses.length - 1)],
-      200,
+      statuses.isEmpty
+          ? 200
+          : statuses[(requests.length - 1).clamp(0, statuses.length - 1)],
       headers: {
         Headers.contentTypeHeader: ['text/event-stream'],
       },
@@ -75,13 +78,14 @@ _openChat(
   List<String> responses, {
   String providerId = 'openai',
   String model = 'test-model',
+  List<int> statuses = const [],
 }) async {
   final root = await Directory.systemTemp.createTemp('community-sync-');
   final database = CoreDatabase.forTesting(
     databaseFactory: databaseFactoryFfi,
     supportDirectoryProvider: () async => root,
   );
-  final adapter = _ScriptedChatAdapter(responses);
+  final adapter = _ScriptedChatAdapter(responses, statuses: statuses);
   final dio = Dio()..httpClientAdapter = adapter;
   addTearDown(() async {
     dio.close(force: true);
@@ -130,6 +134,72 @@ Future<String?> _send(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  test('社区实际聊天接受流式请求返回的完整 JSON', () async {
+    final fixture = await _openChat([
+      jsonEncode({
+        'choices': [
+          {
+            'message': {'role': 'assistant', 'content': 'JSON 正文'},
+            'finish_reason': 'stop',
+          },
+        ],
+      }),
+    ]);
+    expect(await _send(fixture.core, fixture.conversationId), isNull);
+    final messages = await fixture.core.messages.getMessages(
+      fixture.conversationId,
+    );
+    expect(messages.last.content, 'JSON 正文');
+    expect(messages.last.answerStatus, MessageAnswerStatus.completed);
+  });
+
+  test('社区实际聊天只修正明确拒绝的参数，保留额度并复用成功策略', () async {
+    final fixture = await _openChat(
+      [
+        jsonEncode({
+          'error': {
+            'message':
+                'Unknown parameter max_tokens; use max_completion_tokens',
+          },
+        }),
+        _stream(text: '修正成功'),
+      ],
+      statuses: [400, 200],
+      model: 'parameter-repair-model',
+    );
+    expect(await _send(fixture.core, fixture.conversationId), isNull);
+    expect(fixture.adapter.requests, hasLength(2));
+    expect(fixture.adapter.requests.first['max_tokens'], 2048);
+    expect(fixture.adapter.requests.last.containsKey('max_tokens'), isFalse);
+    expect(fixture.adapter.requests.last['max_completion_tokens'], 2048);
+    expect(await _send(fixture.core, fixture.conversationId), isNull);
+    expect(fixture.adapter.requests, hasLength(3));
+    expect(fixture.adapter.requests.last['max_completion_tokens'], 2048);
+  });
+
+  test('网关用503返回余额异常时不自动重试，保留账户提示', () async {
+    final fixture = await _openChat(
+      [
+        jsonEncode({
+          'error': {'message': 'insufficient balance'},
+        }),
+      ],
+      statuses: [503],
+    );
+    final completion = await _send(fixture.core, fixture.conversationId);
+    expect(completion, '请检查服务商账户、余额或额度。');
+    expect(
+      UserFacingErrorPolicy.failureHintFor(completion!),
+      '请检查服务商账户、余额或额度。',
+    );
+    expect(fixture.adapter.requests, hasLength(1));
+    final messages = await fixture.core.messages.getMessages(
+      fixture.conversationId,
+    );
+    expect(messages.last.answerStatus, MessageAnswerStatus.failed);
+    expect(messages.last.failureHint, '请检查服务商账户、余额或额度。');
+  });
 
   test('社区实际聊天累计全文只展示和持久化一次', () async {
     final fixture = await _openChat([

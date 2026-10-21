@@ -18,13 +18,14 @@ import 'widgets/asone_feedback.dart';
 import 'widgets/asone_icons.dart';
 
 import 'community_chat_search_page.dart';
+import 'community_memory_page.dart';
 import 'community_group_page.dart';
 import 'public_core.dart';
 
 /// 社区版基础 API 聊天。
 ///
 /// 页面结构、输入栏、消息操作和错误反馈与正式版保持一致；社区版只执行
-/// 公开的文字 API 聊天，不加载语音、工具、记忆或后台主动能力。
+/// 公开的文字 API 聊天与相关本地记忆，不加载语音、工具或后台主动能力。
 class CommunityChatPage extends StatefulWidget {
   const CommunityChatPage({
     super.key,
@@ -191,6 +192,11 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
       rowHeight: 48,
       entries: const [
         AnchoredPopupMenuEntry(
+          value: 'memory',
+          label: '记忆',
+          icon: AsOneIconName.document,
+        ),
+        AnchoredPopupMenuEntry(
           value: 'search',
           label: '搜索聊天记录',
           icon: AsOneIconName.search,
@@ -209,6 +215,18 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
     );
     if (!mounted) return;
     switch (selected) {
+      case 'memory':
+        final assistant = _assistant;
+        if (assistant != null) {
+          await Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => CommunityMemoryPage(
+                assistant: assistant,
+                conversationId: _conversation?.id,
+              ),
+            ),
+          );
+        }
       case 'search':
         final conversation = _conversation;
         if (conversation == null) {

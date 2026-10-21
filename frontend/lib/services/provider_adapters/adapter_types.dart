@@ -1,8 +1,7 @@
+export 'package:asone_contracts/asone_contracts.dart' show ProtocolDiagnosis;
+
 // 协议适配器数据类型：响应、流事件、工具调用、归一化错误、安全诊断。
 // 移植自桌面 `model_services/types.py` 与 `errors.py`，按移动端 Dart 习惯精简。
-
-// ProtocolDiagnosis 已迁移至公开契约包（asone_contracts），此处再导出保持既有 import 可用。
-export 'package:asone_contracts/asone_contracts.dart' show ProtocolDiagnosis;
 
 /// 归一化错误码（与桌面端一致，用于决定是否换协议重试）。
 class NormalizedError {
@@ -11,6 +10,7 @@ class NormalizedError {
     this.message, {
     this.statusCode,
     this.detail,
+    this.providerMessage = '',
   });
 
   /// 错误码，如 `AUTH_FAILED` / `MODEL_NOT_FOUND` / `INVALID_RESPONSE` 等。
@@ -24,6 +24,7 @@ class NormalizedError {
 
   /// 诊断细节（脱敏，不含 Key / 完整原始响应）。
   final String? detail;
+  final String providerMessage;
 
   @override
   String toString() => message;
@@ -64,9 +65,13 @@ class ProviderToolCall {
     required this.id,
     required this.name,
     required this.arguments,
+    this.nativeId,
   });
 
   final String id;
+
+  /// Null when the protocol omitted an ID. [id] is then a local association.
+  final String? nativeId;
   final String name;
 
   /// 已解析为 Map 的参数（若模型返回 JSON 字符串则已解码）。
@@ -83,6 +88,11 @@ class ProviderResponse {
     this.finishReason = '',
     this.statusCode,
     this.toolCalls = const [],
+    this.nativeContinuation,
+    this.terminalState = ProviderTerminalState.unknown,
+    this.toolReceptions = const [],
+    this.parsingIssues = const [],
+    this.usageSource = 'unreported',
   });
 
   final String text;
@@ -92,6 +102,56 @@ class ProviderResponse {
   final String finishReason;
   final int? statusCode;
   final List<ProviderToolCall> toolCalls;
+  final Map<String, Object?>? nativeContinuation;
+  final ProviderTerminalState terminalState;
+  final List<ProviderToolReception> toolReceptions;
+  final List<String> parsingIssues;
+  final String usageSource;
+
+  bool get canDispatchTools =>
+      terminalState == ProviderTerminalState.toolRequired &&
+      parsingIssues.isEmpty &&
+      toolReceptions.isNotEmpty &&
+      toolReceptions.every(
+        (tool) => tool.state == ProviderToolArgumentState.valid,
+      );
+}
+
+enum ProviderTerminalState {
+  completed,
+  toolRequired,
+  truncated,
+  refused,
+  failed,
+  cancelled,
+  unknown,
+}
+
+enum ProviderToolArgumentState {
+  valid,
+  missing,
+  incomplete,
+  malformed,
+  conflict,
+}
+
+/// Reception evidence is separate from executable calls. Do not log raw input.
+class ProviderToolReception {
+  const ProviderToolReception({
+    required this.id,
+    required this.name,
+    required this.state,
+    this.nativeId,
+    this.arguments,
+    this.rawArguments,
+  });
+
+  final String id;
+  final String? nativeId;
+  final String name;
+  final ProviderToolArgumentState state;
+  final Map<String, Object?>? arguments;
+  final Object? rawArguments;
 }
 
 /// 流式事件增量。
@@ -151,6 +211,7 @@ class AudioPayloadData {
   };
 }
 
+/// 单项检测的安全诊断元数据（不含 Key 与原始响应）。
 /// 可尝试另一个协议的错误码白名单（与桌面 `_may_try_another_protocol` 一致）。
 const retryableErrorCodes = {
   'MODEL_NOT_FOUND',

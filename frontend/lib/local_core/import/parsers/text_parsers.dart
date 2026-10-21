@@ -5,6 +5,8 @@ import 'import_parser.dart';
 import 'parser_models.dart';
 import 'record_parser.dart';
 import 'text_decoder.dart';
+import 'dated_speaker_text.dart';
+import 'dated_text_records.dart';
 
 class PlainTextImportParser implements ImportParser {
   const PlainTextImportParser({required this.format, required this.extensions});
@@ -43,10 +45,15 @@ class PlainTextImportParser implements ImportParser {
     }
     try {
       final decoded = decodeImportText(source.bytes);
-      final parsed = parseTextRecords(
-        decoded.text,
-        maxLineCharacters: limits.maxLineCharacters,
-      );
+      final parsed = hasDatedSpeakerTextPrefix(decoded.text)
+          ? parseDatedTextRecords(
+              decoded.text,
+              maxLineCharacters: limits.maxLineCharacters,
+            )
+          : parseTextRecords(
+              decoded.text,
+              maxLineCharacters: limits.maxLineCharacters,
+            );
       return ParsedImport(
         bundle: ImportBundle(
           schemaVersion: importSchemaVersion,

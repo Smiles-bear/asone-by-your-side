@@ -1,11 +1,13 @@
-import 'dart:convert';
-
+import 'prompt_context_layout.dart';
 import '../model_endpoint.dart';
+
 import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
 import 'adapter_types.dart';
 import 'adapter_helpers.dart';
 import 'protocol_types.dart';
+import 'provider_response_aggregation.dart';
+import 'tool_argument_parser.dart';
 
 /// Google Gemini generateContent 适配器。
 ///
@@ -65,7 +67,9 @@ class GeminiAdapter extends ModelProtocolAdapter {
     final systemParts = <String>[];
     final contents = <Map<String, Object?>>[];
     final nativeCallNames = <String, String>{};
-    for (final message in messages) {
+    final localCallNames = <String, String>{};
+    final associationNativeIds = <String, String?>{};
+    for (final message in layoutPromptContext(messages)) {
       final role = (message['role'] as String?) ?? 'user';
       final content = message['content'] ?? '';
 
@@ -79,14 +83,20 @@ class GeminiAdapter extends ModelProtocolAdapter {
         final toolCallId = message['tool_call_id'] as String?;
         final toolName = message['tool_name'] as String?;
         final toolContent = contentText(content);
+        final nativeId = associationNativeIds.containsKey(toolCallId)
+            ? associationNativeIds[toolCallId]
+            : nativeCallNames.containsKey(toolCallId)
+            ? toolCallId
+            : null;
         contents.add({
           'role': 'user',
           'parts': [
             {
               'functionResponse': {
-                if (nativeCallNames.containsKey(toolCallId)) 'id': toolCallId,
+                if (nativeId != null) 'id': nativeId,
                 'name':
                     toolName ??
+                    localCallNames[toolCallId] ??
                     nativeCallNames[toolCallId] ??
                     toolCallId ??
                     'unknown',
@@ -99,89 +109,44 @@ class GeminiAdapter extends ModelProtocolAdapter {
       }
 
       final parts = <Map<String, Object?>>[];
-      if (content is String) {
-        parts.add({'text': content});
-      } else if (content is List) {
-        for (final part in content) {
-          if (part is! Map) continue;
-          final type = part['type'];
-          if (type == 'text' || type == 'input_text') {
-            parts.add({'text': part['text'] ?? ''});
-          } else if (type == 'image_url' || type == 'input_image') {
-            final raw = part['image_url'];
-            final url = raw is Map ? (raw['url'] as String?) : (raw as String?);
-            if (url != null &&
-                url.startsWith('data:') &&
-                url.contains(';base64,')) {
-              final comma = url.indexOf(',');
-              final header = url.substring(5, url.indexOf(';'));
-              final encoded = url.substring(comma + 1);
-              final mime = header.isEmpty ? 'image/jpeg' : header;
-              parts.add({
-                'inlineData': {'mimeType': mime, 'data': encoded},
-              });
-            }
-          } else if (type == 'file_data') {
-            final data = part['data'] as String?;
-            if (data != null && data.isNotEmpty) {
-              parts.add({
-                'inlineData': {
-                  'mimeType': part['mime_type'] ?? 'application/pdf',
-                  'data': data,
-                },
-              });
-            }
-          }
-        }
-      }
-
-      // 处理 assistant 消息的 tool_calls
-      if (role == 'assistant' && message['tool_calls'] != null) {
-        final toolCalls = message['tool_calls'] as List?;
-        if (toolCalls != null) {
-          for (final call in toolCalls) {
-            if (call is! Map) continue;
-            final func = call['function'] as Map?;
-            if (func == null) continue;
-            final name = func['name'] as String?;
-            final argsStr = func['arguments'] as String?;
-            if (name == null) continue;
-
-            Map<String, dynamic> args = {};
-            if (argsStr != null && argsStr.isNotEmpty) {
-              try {
-                final decoded = jsonDecode(argsStr);
-                if (decoded is Map) {
-                  args = Map<String, dynamic>.from(decoded);
-                }
-              } catch (_) {}
-            }
-
-            parts.add({
-              'functionCall': {'name': name, 'args': args},
-            });
-          }
-        }
-      }
-
       final native = message['_provider_continuation'];
       if (role == 'assistant' &&
           native is Map &&
           native['protocol'] == protocolType &&
           native['items'] is List) {
-        parts
-          ..clear()
-          ..addAll(
-            (native['items'] as List).whereType<Map>().map(
-              (item) => item.cast<String, Object?>(),
-            ),
+        parts.addAll(_nativeContinuationParts(native['items'] as List));
+        if (parts.isEmpty) {
+          throw const FormatException(
+            'Gemini native continuation has no parts',
           );
-      }
-      for (final part in parts) {
-        final call = part['functionCall'];
-        if (call is Map && call['id'] is String && call['name'] is String) {
-          nativeCallNames[call['id'] as String] = call['name'] as String;
         }
+        for (final part in parts) {
+          final call = part['functionCall'];
+          if (call is Map && call['id'] is String && call['name'] is String) {
+            nativeCallNames[call['id'] as String] = call['name'] as String;
+          }
+        }
+        final associations = native['tool_associations'];
+        if (associations is List) {
+          for (final association in associations.whereType<Map>()) {
+            if (association['id'] is String && association['name'] is String) {
+              localCallNames[association['id'] as String] =
+                  association['name'] as String;
+              final nativeId = association['native_id'];
+              if (nativeId == null || nativeId is String) {
+                associationNativeIds[association['id'] as String] =
+                    nativeId as String?;
+              }
+            }
+          }
+        }
+        contents.add({'role': 'model', 'parts': parts});
+        continue;
+      }
+      _appendContentBlocks(parts, content);
+
+      if (role == 'assistant') {
+        _appendToolCalls(parts, message['tool_calls']);
       }
 
       contents.add({
@@ -192,6 +157,70 @@ class GeminiAdapter extends ModelProtocolAdapter {
     return {
       'systemInstruction': systemParts.join('\n\n'),
       'contents': contents,
+    };
+  }
+
+  void _appendToolCalls(List<Map<String, Object?>> parts, Object? raw) {
+    final toolCalls = raw as List?;
+    if (toolCalls == null) return;
+    for (final call in toolCalls) {
+      if (call is! Map) continue;
+      final func = call['function'] as Map?;
+      if (func == null) continue;
+      final name = func['name'] as String?;
+      final argsStr = func['arguments'] as String?;
+      if (name == null) continue;
+      parts.add({
+        'functionCall': {
+          'name': name,
+          'args': _decodeFunctionArguments(argsStr),
+        },
+      });
+    }
+  }
+
+  Map<String, dynamic> _decodeFunctionArguments(String? raw) {
+    return requireToolArguments(raw);
+  }
+
+  void _appendContentBlocks(List<Map<String, Object?>> parts, Object? content) {
+    if (content is String) {
+      parts.add({'text': content});
+    } else if (content is List) {
+      for (final part in content) {
+        if (part is! Map) continue;
+        final type = part['type'];
+        if (type == 'text' || type == 'input_text') {
+          parts.add({'text': part['text'] ?? ''});
+        } else if (type == 'image_url' || type == 'input_image') {
+          final image = _inlineImageBlock(part['image_url']);
+          if (image != null) parts.add(image);
+        } else if (type == 'file_data') {
+          final data = part['data'] as String?;
+          if (data != null && data.isNotEmpty) {
+            parts.add({
+              'inlineData': {
+                'mimeType': part['mime_type'] ?? 'application/pdf',
+                'data': data,
+              },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  Map<String, Object?>? _inlineImageBlock(Object? raw) {
+    final url = raw is Map ? (raw['url'] as String?) : (raw as String?);
+    if (url == null || !url.startsWith('data:') || !url.contains(';base64,')) {
+      return null;
+    }
+    final comma = url.indexOf(',');
+    final header = url.substring(5, url.indexOf(';'));
+    final encoded = url.substring(comma + 1);
+    final mime = header.isEmpty ? 'image/jpeg' : header;
+    return {
+      'inlineData': {'mimeType': mime, 'data': encoded},
     };
   }
 
@@ -287,6 +316,12 @@ class GeminiAdapter extends ModelProtocolAdapter {
       maxTokens: maxTokens,
       temperature: temperature,
     );
+    applyOutputContractPolicy(
+      payload,
+      protocol: protocolType,
+      providerId: providerId ?? '',
+      contract: contract,
+    );
     final schema = contract.schema;
     if (contract.requiresStructuredData && schema != null) {
       if (structuredTransport == StructuredOutputTransport.geminiSchema) {
@@ -367,34 +402,30 @@ class GeminiAdapter extends ModelProtocolAdapter {
   }
 
   @override
-  List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) {
+  List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) =>
+      _receivedCalls(aggregateProviderPayload(this, payload));
+
+  @override
+  Map<String, Object?>? extractNativeContinuation(
+    Map<dynamic, dynamic> payload,
+  ) {
     final candidates = payload['candidates'];
-    if (candidates is! List) return const [];
-    final calls = <ProviderToolCall>[];
-    for (final candidate in candidates) {
-      if (candidate is! Map) continue;
-      final content = candidate['content'];
-      if (content is! Map) continue;
-      final parts = content['parts'];
-      if (parts is List) {
-        for (final part in parts) {
-          if (part is! Map) continue;
-          final call = part['functionCall'];
-          if (call is! Map) continue;
-          final name = (call['name'] as String?) ?? '';
-          if (name.isEmpty) continue;
-          calls.add(
-            ProviderToolCall(
-              id: (call['id'] as String?) ?? name,
-              name: name,
-              arguments: _parseArguments(call['args']),
-            ),
-          );
-        }
-      }
+    if (candidates is! List || candidates.isEmpty || candidates.first is! Map) {
+      return null;
     }
-    return calls;
+    final content = (candidates.first as Map)['content'];
+    final parts = content is Map ? content['parts'] : null;
+    if (parts is! List || parts.isEmpty) return null;
+    final nativeParts = _nativeContinuationParts(parts);
+    if (nativeParts.isEmpty) return null;
+    return <String, Object?>{'protocol': protocolType, 'items': nativeParts};
   }
+
+  List<Map<String, Object?>> _nativeContinuationParts(List parts) => [
+    for (final part in parts.whereType<Map>())
+      if (part.length != 1 || part['text'] != '')
+        Map<String, Object?>.from(part),
+  ];
 
   @override
   String streamTextFromFrame(SseFrame frame) {
@@ -413,6 +444,12 @@ class GeminiAdapter extends ModelProtocolAdapter {
         streamFailureReason(frame.data, fallback: 'gemini_error'),
       );
     }
+    final feedback = frame.data['promptFeedback'];
+    if (feedback is Map && feedback['blockReason'] != null) {
+      return ProviderStreamTerminal.failure(
+        'prompt_block:${feedback['blockReason']}',
+      );
+    }
     final candidates = frame.data['candidates'];
     if (candidates is! List || candidates.isEmpty || candidates.first is! Map) {
       return const ProviderStreamTerminal.none();
@@ -428,15 +465,13 @@ class GeminiAdapter extends ModelProtocolAdapter {
   }
 
   @override
-  List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) {
-    // Gemini 流式：每个帧包含完整的 candidates 结构
-    // 从最后一个包含工具调用的帧提取（流式累积，最后一帧最完整）
-    for (final frame in frames.reversed) {
-      final calls = extractToolCalls(frame.data);
-      if (calls.isNotEmpty) return calls;
-    }
-    return const [];
-  }
+  List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) =>
+      _receivedCalls(aggregateProviderFrames(this, frames));
+
+  @override
+  Map<String, Object?>? streamExtractNativeContinuation(
+    List<SseFrame> frames,
+  ) => aggregateProviderFrames(this, frames).nativeContinuation;
 
   @override
   Map<String, Object?> toolProbePayload(
@@ -444,6 +479,7 @@ class GeminiAdapter extends ModelProtocolAdapter {
     String toolName,
     String instruction, {
     String? providerId,
+    String expectedCode = 'AZ731',
   }) {
     final payload = _payload(
       [
@@ -463,7 +499,7 @@ class GeminiAdapter extends ModelProtocolAdapter {
               'properties': {
                 'code': {
                   'type': 'STRING',
-                  'enum': ['AZ731'],
+                  'enum': [expectedCode],
                 },
               },
               'required': ['code'],
@@ -529,6 +565,18 @@ class GeminiAdapter extends ModelProtocolAdapter {
     final type = schema['type'];
     if (type is String) {
       result['type'] = type.toUpperCase();
+    } else if (type is List) {
+      final nonNull = type.where((value) => value != 'null').toList();
+      if (type.contains('null')) result['nullable'] = true;
+      if (nonNull.length == 1 && nonNull.single is String) {
+        result['type'] = (nonNull.single as String).toUpperCase();
+      } else if (nonNull.isNotEmpty) {
+        result['anyOf'] = [
+          for (final value in nonNull) _convertSchemaToGemini({'type': value}),
+        ];
+      } else {
+        result['type'] = 'NULL';
+      }
     }
     final items = schema['items'];
     if (items is Map) result['items'] = _convertSchemaToGemini(items);
@@ -562,14 +610,22 @@ class GeminiAdapter extends ModelProtocolAdapter {
     return result;
   }
 
-  Map<String, Object?> _parseArguments(dynamic raw) {
-    if (raw is Map) return Map<String, Object?>.from(raw);
-    if (raw is String) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) return Map<String, Object?>.from(decoded);
-      } catch (_) {}
+  // Legacy extraction returns reception data; dispatch gates use the shared result.
+  List<ProviderToolCall> _receivedCalls(ProviderResponse response) {
+    if (response.toolReceptions.any(
+          (tool) => tool.state != ProviderToolArgumentState.valid,
+        ) ||
+        response.parsingIssues.isNotEmpty) {
+      throw const FormatException('invalid_tool_reception');
     }
-    return {};
+    return [
+      for (final tool in response.toolReceptions)
+        ProviderToolCall(
+          id: tool.id,
+          nativeId: tool.nativeId,
+          name: tool.name,
+          arguments: tool.arguments!,
+        ),
+    ];
   }
 }

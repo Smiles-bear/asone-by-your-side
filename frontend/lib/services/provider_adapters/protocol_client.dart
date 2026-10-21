@@ -12,11 +12,14 @@ import 'incremental_sse_decoder.dart';
 import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
 import 'model_output_length_failure.dart';
+import 'provider_response_aggregation.dart';
+import 'model_parameter_policy.dart';
 import 'structured_output_receiver.dart';
 import 'protocol_types.dart';
 import 'upstream_failure_policy.dart';
 import 'gemini_adapter.dart';
 import '../debug_logger.dart';
+import '../model_endpoint.dart';
 import 'protocol_context_recorder.dart';
 
 part 'structured_protocol_result.dart';
@@ -88,9 +91,11 @@ class ProtocolClient {
     String preferredProtocol = ProtocolType.auto,
   }) async {
     final registry = AdapterRegistry.instance;
-    final candidates = preferredProtocol == ProtocolType.auto
-        ? registry.autoCandidates()
-        : [preferredProtocol];
+    final candidates = modelProtocolCandidates(
+      baseUrl: baseUrl,
+      modelId: modelId,
+      preference: preferredProtocol,
+    );
 
     ProtocolDiagnosis? lastDiagnosis;
     for (final protocol in candidates) {
@@ -547,6 +552,7 @@ class ProtocolClient {
       modelId: modelId,
       protocolType: adapter.protocolType,
       directResponse: true,
+      apiKey: apiKey,
     );
     // 记录请求上下文
     final messages = _inspectableMessages(payload);
@@ -590,6 +596,12 @@ class ProtocolClient {
     Response<dynamic>? response;
     String? usedEndpoint;
 
+    final parameterPolicy = ModelParameterPolicy.forEndpoint(
+      baseUrl: baseUrl,
+      modelId: modelId,
+      protocol: adapter.protocolType,
+      apiKey: apiKey,
+    );
     endpointLoop:
     for (final endpoint in endpoints) {
       for (var attempt = 0; attempt < 2; attempt++) {
@@ -606,14 +618,34 @@ class ProtocolClient {
             cancelToken: cancelToken,
           );
           usedEndpoint = endpoint;
+          parameterPolicy.rememberSuccess(payload);
           _rememberEndpoint(hints, endpointKey, endpoint, response.statusCode);
           break endpointLoop;
         } on DioException catch (error) {
           final status = error.response?.statusCode;
+          final normalized = normalizeHttpError(
+            status ?? 0,
+            error.response?.data,
+            error.message ?? '',
+          );
+          if (attempt == 0 &&
+              parameterPolicy.adjustAfterRejection(
+                statusCode: status,
+                response: error.response?.data,
+                payload: payload,
+              )) {
+            continue;
+          }
           if (status == 404 && hints[endpointKey] == endpoint) {
             hints.remove(endpointKey);
           }
-          if (_isRetryableStatus(status) && attempt == 0) {
+          if (_isRetryableStatus(status) &&
+              attempt == 0 &&
+              UpstreamFailurePolicy.isTransient(
+                statusCode: status,
+                code: normalized.code,
+                reason: normalized.providerMessage,
+              )) {
             await Future<void>.delayed(const Duration(milliseconds: 600));
             continue;
           }
@@ -622,12 +654,6 @@ class ProtocolClient {
             continue endpointLoop;
           }
           watch.stop();
-          final normalized = normalizeHttpError(
-            status ?? 0,
-            error.response?.data,
-            error.message ?? '',
-          );
-
           // 记录错误
           final errorDetail = diagnosticErrorDetail(
             normalized,
@@ -1036,17 +1062,16 @@ class ProtocolClient {
 
     statusCode = response!.statusCode;
     contentType = _contentType(response);
-    final textAccumulator = ProviderStreamTextAccumulator();
+    final responseAccumulator = ProviderResultAggregator(adapter: adapter);
     final reasoningBuffer = StringBuffer();
     try {
       final decoded = await decodeIncrementalSse(
         stream: stream,
         adapter: adapter,
         onFrame: (frame) {
-          final delta = textAccumulator.add(
-            adapter.streamTextChunkFromFrame(frame),
-          );
-          final reasoningDelta = adapter.streamReasoningFromFrame(frame);
+          final event = responseAccumulator.addFrame(frame);
+          final delta = event.textDelta;
+          final reasoningDelta = event.reasoningDelta;
           if (reasoningDelta.isNotEmpty) {
             reasoningBuffer.write(reasoningDelta);
           }
@@ -1057,8 +1082,9 @@ class ProtocolClient {
       );
       watch.stop();
       final elapsedMs = watch.elapsedMilliseconds;
-      final text = textAccumulator.text;
-      final toolCalls = adapter.streamExtractToolCalls(decoded.frames);
+      final aggregated = responseAccumulator.finish(terminal: decoded.terminal);
+      final text = aggregated.text;
+      final toolCalls = aggregated.toolCalls;
       final diagnostic = decoded.diagnostic(
         adapter.protocolType,
         elapsedMs,
@@ -1107,7 +1133,9 @@ class ProtocolClient {
           ),
         );
       }
-      final success = text.trim().isNotEmpty || toolCalls.isNotEmpty;
+      final success =
+          aggregated.parsingIssues.isEmpty &&
+          (text.trim().isNotEmpty || toolCalls.isNotEmpty);
       final terminationReason = decoded.usedCleanEofFallback
           ? 'clean_eof_fallback'
           : decoded.terminal.reason;
@@ -1141,7 +1169,7 @@ class ProtocolClient {
       );
     } catch (e) {
       watch.stop();
-      final text = textAccumulator.text;
+      final text = responseAccumulator.text;
       _recorder?.updateResponse(
         requestId,
         text,

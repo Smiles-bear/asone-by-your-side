@@ -23,7 +23,7 @@ class CommunityFeaturePage extends StatelessWidget {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 6),
-        const Text('所有公开数据保存在本机；不包含记忆、语音、设备控制或后台主动能力。'),
+        const Text('所有公开数据保存在本机；可从助手或聊天菜单管理记忆。语音、设备控制和后台主动能力暂未开放。'),
         const SizedBox(height: 16),
         Card(
           child: ListTile(

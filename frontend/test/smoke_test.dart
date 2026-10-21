@@ -91,7 +91,7 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const Key('community-profile-diary')), findsOneWidget);
-    expect(find.textContaining('聊天、群聊、模型服务和导入数据保存在本机'), findsOneWidget);
+    expect(find.textContaining('聊天、群聊、记忆、模型服务和导入数据保存在本机'), findsOneWidget);
   });
 
   testWidgets('我的页可进入模型服务并看到演示配置', (tester) async {

@@ -222,7 +222,7 @@ class _CommunityAssistantFormPageState
                   ],
                   const SizedBox(height: 20),
                   const Text(
-                    '社区版只开放本地助手、API 聊天和基础对话管理；记忆、语音、工具等能力暂未开放。',
+                    '社区版开放本地助手、API 聊天、记忆和基础对话管理；语音、工具等能力暂未开放。',
                     style: TextStyle(height: 1.5),
                   ),
                 ],

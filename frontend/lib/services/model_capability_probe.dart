@@ -52,7 +52,7 @@ class ModelCapabilityProbe {
       baseUrl: service.baseUrl,
       apiKey: service.apiKey,
       modelId: service.model,
-      preferredProtocol: ProtocolType.auto,
+      preferredProtocol: service.protocolType,
     );
     if (resolution.success) {
       _resolvedAdapter = resolution.adapter;

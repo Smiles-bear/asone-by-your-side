@@ -1,10 +1,11 @@
-import 'dart:convert';
+import 'prompt_context_layout.dart';
 
 import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
 import 'adapter_types.dart';
 import 'adapter_helpers.dart';
 import 'protocol_types.dart';
+import 'provider_response_aggregation.dart';
 
 /// OpenAI Chat Completions 适配器（/chat/completions）。
 ///
@@ -42,7 +43,7 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
   }) {
     final payload = <String, Object?>{
       'model': modelId,
-      'messages': _normalizeFileParts(messages),
+      'messages': _normalizeFileParts(layoutPromptContext(messages)),
       'stream': false,
       'temperature': temperature,
     };
@@ -61,7 +62,7 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
   }) {
     final payload = <String, Object?>{
       'model': modelId,
-      'messages': _normalizeFileParts(messages),
+      'messages': _normalizeFileParts(layoutPromptContext(messages)),
       'stream': true,
       'temperature': temperature,
     };
@@ -86,16 +87,12 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
       maxTokens: maxTokens,
       temperature: temperature,
     );
-    if (contract.reasoningPolicy != ModelReasoningPolicy.providerDefault) {
-      if (providerId == 'qwen' &&
-          contract.reasoningPolicy == ModelReasoningPolicy.disabledPreferred) {
-        payload['enable_thinking'] = false;
-      } else if (providerId == 'deepseek') {
-        payload['thinking'] = <String, Object?>{'type': 'disabled'};
-      } else {
-        payload['reasoning_effort'] = 'low';
-      }
-    }
+    applyOutputContractPolicy(
+      payload,
+      protocol: protocolType,
+      providerId: providerId ?? '',
+      contract: contract,
+    );
     final schema = contract.schema;
     if (contract.requiresStructuredData && schema != null) {
       if (structuredTransport == StructuredOutputTransport.jsonSchema) {
@@ -135,8 +132,26 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
     List<Map<String, Object?>> messages,
   ) => messages
       .map((message) {
+        final native = message['_provider_continuation'];
+        if (message['role'] == 'assistant' &&
+            native is Map &&
+            native['protocol'] == protocolType &&
+            native['items'] is List &&
+            (native['items'] as List).isNotEmpty &&
+            (native['items'] as List).first is Map) {
+          return <String, Object?>{
+            for (final entry in message.entries)
+              if (entry.key != '_provider_continuation') entry.key: entry.value,
+            ...((native['items'] as List).first as Map).cast<String, Object?>(),
+          };
+        }
         final content = message['content'];
-        if (content is! List) return message;
+        if (content is! List) {
+          return <String, Object?>{
+            for (final entry in message.entries)
+              if (entry.key != '_provider_continuation') entry.key: entry.value,
+          };
+        }
         return {
           ...message,
           'content': content
@@ -207,27 +222,33 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
   }
 
   @override
-  List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) {
+  List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) =>
+      _receivedCalls(aggregateProviderPayload(this, payload));
+
+  @override
+  Map<String, Object?>? extractNativeContinuation(
+    Map<dynamic, dynamic> payload,
+  ) {
     final choices = payload['choices'];
-    if (choices is! List || choices.isEmpty) return const [];
-    final message = (choices.first as Map)['message'];
-    if (message is! Map || message['tool_calls'] is! List) return const [];
-    final calls = <ProviderToolCall>[];
-    for (final raw in message['tool_calls'] as List) {
-      if (raw is! Map || raw['function'] is! Map) continue;
-      final function = raw['function'] as Map;
-      final name = function['name'] as String? ?? '';
-      if (name.isEmpty) continue;
-      final arguments = _parseArguments(function['arguments']);
-      calls.add(
-        ProviderToolCall(
-          id: (raw['id'] as String?) ?? name,
-          name: name,
-          arguments: arguments,
-        ),
-      );
+    if (choices is! List || choices.isEmpty || choices.first is! Map) {
+      return null;
     }
-    return calls;
+    final message = (choices.first as Map)['message'];
+    if (message is! Map) return null;
+    final item = <String, Object?>{};
+    for (final key in const <String>[
+      'content',
+      'reasoning_content',
+      'reasoning_details',
+      'tool_calls',
+    ]) {
+      if (message.containsKey(key)) item[key] = message[key];
+    }
+    if (item.isEmpty) return null;
+    return <String, Object?>{
+      'protocol': protocolType,
+      'items': <Object?>[item],
+    };
   }
 
   @override
@@ -300,70 +321,13 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
   }
 
   @override
-  List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) {
-    // 累积所有 delta 中的 tool_calls
-    final toolCallsMap = <String, Map<String, dynamic>>{};
+  List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) =>
+      _receivedCalls(aggregateProviderFrames(this, frames));
 
-    for (final frame in frames) {
-      final choices = frame.data['choices'];
-      if (choices is! List || choices.isEmpty) continue;
-      final delta = (choices.first as Map)['delta'];
-      if (delta is! Map || delta['tool_calls'] is! List) continue;
-
-      for (final toolCall in delta['tool_calls'] as List) {
-        if (toolCall is! Map) continue;
-        final index = toolCall['index'] as int?;
-        final id = toolCall['id'] as String?;
-        final type = toolCall['type'] as String?;
-        final function = toolCall['function'] as Map?;
-
-        if (index == null) continue;
-        final key = index.toString();
-
-        toolCallsMap.putIfAbsent(
-          key,
-          () => {
-            'id': id ?? '',
-            'type': type ?? 'function',
-            'function': {'name': '', 'arguments': ''},
-          },
-        );
-
-        if (id != null) toolCallsMap[key]!['id'] = id;
-        if (type != null) toolCallsMap[key]!['type'] = type;
-        if (function != null) {
-          final existingFunc =
-              toolCallsMap[key]!['function'] as Map<String, dynamic>;
-          if (function['name'] != null) {
-            existingFunc['name'] = function['name'];
-          }
-          if (function['arguments'] != null) {
-            existingFunc['arguments'] =
-                (existingFunc['arguments'] as String) +
-                (function['arguments'] as String);
-          }
-        }
-      }
-    }
-
-    // 转换为 ProviderToolCall
-    final calls = <ProviderToolCall>[];
-    for (final entry in toolCallsMap.values) {
-      final function = entry['function'] as Map;
-      final name = function['name'] as String? ?? '';
-      if (name.isEmpty) continue;
-      final arguments = _parseArguments(function['arguments']);
-      calls.add(
-        ProviderToolCall(
-          id: entry['id'] as String? ?? name,
-          name: name,
-          arguments: arguments,
-        ),
-      );
-    }
-
-    return calls;
-  }
+  @override
+  Map<String, Object?>? streamExtractNativeContinuation(
+    List<SseFrame> frames,
+  ) => aggregateProviderFrames(this, frames).nativeContinuation;
 
   @override
   Map<String, Object?> toolProbePayload(
@@ -371,6 +335,7 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
     String toolName,
     String instruction, {
     String? providerId,
+    String expectedCode = 'AZ731',
   }) {
     final payload = {
       'model': modelId,
@@ -391,7 +356,7 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
               'properties': {
                 'code': {
                   'type': 'string',
-                  'enum': ['AZ731'],
+                  'enum': [expectedCode],
                 },
               },
               'required': ['code'],
@@ -412,11 +377,6 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
         'function': {'name': toolName},
       };
     }
-    if (providerId == 'deepseek' &&
-        modelId.trim().toLowerCase().startsWith('deepseek-v4')) {
-      payload['thinking'] = <String, Object?>{'type': 'disabled'};
-    }
-
     return payload;
   }
 
@@ -433,9 +393,6 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
       'temperature': 0,
       'max_tokens': 256,
       if (providerId == 'qwen') 'enable_thinking': false,
-      if (providerId == 'deepseek' &&
-          modelId.trim().toLowerCase().startsWith('deepseek-v4'))
-        'thinking': <String, Object?>{'type': 'disabled'},
       'messages': [
         {'role': 'user', 'content': instruction},
       ],
@@ -463,9 +420,6 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
       'temperature': 0,
       'max_tokens': 256,
       if (providerId == 'qwen') 'enable_thinking': false,
-      if (providerId == 'deepseek' &&
-          modelId.trim().toLowerCase().startsWith('deepseek-v4'))
-        'thinking': <String, Object?>{'type': 'disabled'},
       'messages': [
         {'role': 'system', 'content': '只输出 JSON 对象，不要输出 Markdown 或解释。'},
         {'role': 'user', 'content': instruction},
@@ -474,14 +428,22 @@ class OpenAIChatAdapter extends ModelProtocolAdapter {
     };
   }
 
-  Map<String, Object?> _parseArguments(dynamic raw) {
-    if (raw is Map) return Map<String, Object?>.from(raw);
-    if (raw is String) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) return Map<String, Object?>.from(decoded);
-      } catch (_) {}
+  // Legacy extraction returns reception data; dispatch gates use the shared result.
+  List<ProviderToolCall> _receivedCalls(ProviderResponse response) {
+    if (response.toolReceptions.any(
+          (tool) => tool.state != ProviderToolArgumentState.valid,
+        ) ||
+        response.parsingIssues.isNotEmpty) {
+      throw const FormatException('invalid_tool_reception');
     }
-    return {};
+    return [
+      for (final tool in response.toolReceptions)
+        ProviderToolCall(
+          id: tool.id,
+          nativeId: tool.nativeId,
+          name: tool.name,
+          arguments: tool.arguments!,
+        ),
+    ];
   }
 }

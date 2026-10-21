@@ -12,6 +12,7 @@ import '../widgets/asone_button.dart';
 import '../widgets/asone_feedback.dart';
 import '../widgets/asone_icons.dart';
 import '../widgets/asone_surface.dart';
+import '../widgets/model_protocol_preference_field.dart';
 import 'capability_detection_page.dart';
 
 /// 新建模型配置页：官方预填地址可改，自定义为空。
@@ -54,6 +55,7 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
 
   bool _discovering = false;
   bool _obscureKey = true;
+  String _protocolPreference = 'auto';
   List<Map<String, dynamic>> _discoveredModels = [];
   Map<String, String>? _selectedModelCapabilities;
 
@@ -62,6 +64,7 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
   @override
   void initState() {
     super.initState();
+    _protocolPreference = widget.provider.protocol;
     if (_isOfficial) {
       _baseUrlController.text = widget.provider.baseUrl;
     }
@@ -106,17 +109,15 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
           baseUrl == normalizeModelBaseUrl(widget.provider.baseUrl);
       if (useOfficialDiscovery) {
         models = await _api.discoverProviderModels(widget.provider.id, apiKey);
-      } else if (
-        _isOfficial &&
-        baseUrl == normalizeModelBaseUrl(widget.provider.baseUrl)
-      ) {
+      } else if (_isOfficial &&
+          baseUrl == normalizeModelBaseUrl(widget.provider.baseUrl)) {
         // 部分官方服务商没有公开 /models，保留手动填写模型的路径。
         models = const [];
       } else {
         models = await _api.discoverModelsWithCredentials(
           baseUrl: baseUrl,
           apiKey: apiKey,
-          protocolType: _isOfficial ? widget.provider.protocol : 'auto',
+          protocolType: _protocolPreference,
         );
       }
       _baseUrlController.text = baseUrl;
@@ -183,7 +184,7 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
         'base_url': baseUrl,
         'api_key': apiKey,
         'model': modelName,
-        'protocol_type': _isOfficial ? widget.provider.protocol : 'auto',
+        'protocol_type': _protocolPreference,
         'provider_id': widget.provider.id,
         'status': 'available',
       };
@@ -304,6 +305,13 @@ class _ModelServiceNewPageState extends State<ModelServiceNewPage> {
                       labelText: '模型名称（可选）',
                       hintText: '可选择或手动填写',
                     ),
+                  ),
+                  ModelProtocolPreferenceField(
+                    value: _protocolPreference,
+                    onChanged: (value) => setState(() {
+                      _protocolPreference = value;
+                      _selectedModelCapabilities = null;
+                    }),
                   ),
                   if (_discoveredModels.isNotEmpty) ...[
                     const SizedBox(height: 12),

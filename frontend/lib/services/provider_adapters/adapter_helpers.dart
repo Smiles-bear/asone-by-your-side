@@ -1,8 +1,12 @@
 import 'dart:convert';
 
 import 'adapter_types.dart';
+import '../provider_failure_presentation.dart';
 import 'protocol_types.dart';
 import 'reasoning_recovery_policy.dart';
+import 'provider_rejection_evidence.dart';
+import 'model_parameter_policy.dart';
+import 'tool_argument_parser.dart';
 
 /// 适配器共享工具：端点拼接、内容提取、JSON 解包、SSE 解析、错误归一化。
 ///
@@ -58,57 +62,50 @@ List<String> endpointVariants(String baseUrl, String path) {
   return variants;
 }
 
-/// 为需要直接结果的非流式请求应用官方模型参数。
-///
-/// qwen3.8-max 在未指定思考强度时默认使用超高思考预算。绘画、能力探测、
-/// 视觉短答、日记和记忆整理使用低思考以控制延迟。Grok 4.6 使用兼容的
-/// token 参数；聊天保留模型默认思考强度。
+/// Shared endpoint policy for every production and capability request.
 void applyModelRequestPolicy(
   Map<String, Object?> payload, {
   required String baseUrl,
   required String modelId,
   required String protocolType,
   required bool directResponse,
+  String apiKey = '',
+  String requestPath = '',
 }) {
-  if (protocolType != ProtocolType.openaiChat) return;
-  final normalizedModel = modelId.trim().toLowerCase();
-  final host = Uri.tryParse(baseUrl.trim())?.host.toLowerCase() ?? '';
-  // OpenRouter 使用统一的 reasoning 对象，而不是 OpenAI 的独立字段。
-  // 只转换需要直接结果的请求，普通聊天仍保留服务商默认行为。
-  if (host == 'openrouter.ai' && directResponse) {
+  ModelParameterPolicy.forEndpoint(
+    baseUrl: baseUrl,
+    modelId: modelId,
+    protocol: protocolType,
+    apiKey: apiKey,
+    requestPath: requestPath,
+  ).apply(payload, directResponse: directResponse);
+  final host = Uri.tryParse(baseUrl)?.host.toLowerCase() ?? '';
+  // OpenRouter declares the unified `reasoning` object, not OpenAI's knob.
+  // Preserve the chosen effort and provider-default chat requests.
+  if (protocolType == ProtocolType.openaiChat &&
+      host == 'openrouter.ai' &&
+      directResponse) {
     final effort = payload.remove('reasoning_effort');
     if (effort != null && !payload.containsKey('reasoning')) {
       payload['reasoning'] = <String, Object?>{'effort': effort};
     }
   }
-
-  if (normalizedModel == 'grok-4.6') {
-    final maxTokens = payload.remove('max_tokens');
-    if (maxTokens != null) payload['max_completion_tokens'] = maxTokens;
-    payload.remove('temperature');
-    if (directResponse) payload['reasoning_effort'] = 'low';
-  }
-
-  if (normalizedModel != 'qwen3.8-max') return;
-  final isOfficialQwen =
-      host == 'dashscope.aliyuncs.com' ||
-      host == 'dashscope-us.aliyuncs.com' ||
-      host.endsWith('.maas.aliyuncs.com');
-  if (isOfficialQwen) {
-    final maxTokens = payload.remove('max_tokens');
-    if (maxTokens != null) payload['max_completion_tokens'] = maxTokens;
-    if (directResponse && !payload.containsKey('enable_thinking')) {
-      payload['reasoning_effort'] = 'low';
-    }
-  }
 }
 
-/// Use only verified provider/protocol overrides for a reasoning-only recovery.
+/// Returns the narrow protocol override used when a DeepSeek chat stream
+/// finishes with reasoning but no user-visible content.
+///
+/// Recovery uses an explicit provider/protocol capability registry, not model
+/// name matching. Other providers keep their original contract and surface
+/// the existing empty-response failure instead of receiving an unverified
+/// parameter.
 Map<String, Object?> reasoningOnlyRecoveryPayload({
   required String providerId,
   required String modelId,
   required String protocolType,
-}) => ReasoningRecoveryPolicy.payload(providerId, protocolType);
+}) {
+  return ReasoningRecoveryPolicy.payload(providerId, protocolType);
+}
 
 /// 从 OpenAI 风格 content 字段提取文本。
 /// content 可以是 String，也可以是 [{type:text, text:...}, ...] 列表。
@@ -135,11 +132,11 @@ Map<dynamic, dynamic>? jsonObject(dynamic value) {
   }
   if (value is! String || value.trim().isEmpty) return null;
   try {
-    final decoded = jsonDecode(value);
+    final decoded = decodeStrictProviderJson(value);
     if (decoded is Map) return decoded;
     // 双层：外层字符串解出来还是字符串，再解一次。
     if (decoded is String) {
-      final inner = jsonDecode(decoded);
+      final inner = decodeStrictProviderJson(decoded);
       if (inner is Map) return inner;
     }
   } catch (_) {
@@ -225,11 +222,21 @@ String streamFailureReason(
   required String fallback,
 }) {
   final error = data['error'];
+  final response = data['response'];
+  final nestedError = response is Map ? response['error'] : null;
+  final incomplete =
+      data['incomplete_details'] ??
+      (response is Map ? response['incomplete_details'] : null);
   final values = <Object?>[
     data['type'],
     data['code'],
     if (error is Map) error['type'],
     if (error is Map) error['code'],
+    if (nestedError is Map) nestedError['type'],
+    if (nestedError is Map) nestedError['code'],
+    if (incomplete is Map) incomplete['reason'],
+    if (response is Map && nestedError == null && incomplete == null)
+      response['status'],
   ];
   final parts = values
       .whereType<Object>()
@@ -241,6 +248,60 @@ String streamFailureReason(
 }
 
 /// 把 HTTP 错误响应归一化为 NormalizedError。
+String? _providerResponseMessage(Map<dynamic, dynamic>? map) {
+  // 尝试从常见错误结构提取 message。
+  String? serverMessage;
+  if (map != null) {
+    final error = map['error'];
+    if (error is Map) {
+      serverMessage = (error['message'] is String
+          ? error['message'] as String
+          : null);
+    } else if (error is String) {
+      serverMessage = error;
+    }
+    serverMessage ??=
+        (map['message'] is String ? map['message'] as String : null) ??
+        (map['detail'] is String ? map['detail'] as String : null);
+  }
+
+  return serverMessage;
+}
+
+String? _providerSemanticCode(
+  Map<dynamic, dynamic>? map,
+  int status,
+  String? technicalFact,
+) {
+  final error = map?['error'];
+  final semanticCode =
+      (error is Map ? error['code'] ?? error['type'] : map?['code'])
+          ?.toString()
+          .toLowerCase();
+  if (const {
+        'protocol_mismatch',
+        'unsupported_protocol',
+      }.contains(semanticCode) &&
+      const {401, 402, 403, 408, 429}.contains(status)) {
+    return null;
+  }
+  return const {
+        'invalid_api_key': 'AUTH_FAILED',
+        'authentication_error': 'AUTH_FAILED',
+        'insufficient_quota': 'ACCOUNT_BILLING',
+        'insufficient_balance': 'ACCOUNT_BILLING',
+        'billing_error': 'ACCOUNT_BILLING',
+        'account_deactivated': 'ACCOUNT_BILLING',
+        'invalid_request_error': 'INVALID_REQUEST',
+        'invalid_parameter': 'INVALID_REQUEST',
+        'model_not_found': 'INVALID_REQUEST',
+        'rate_limit_exceeded': 'RATE_LIMITED',
+        'protocol_mismatch': 'PROTOCOL_MISMATCH',
+        'unsupported_protocol': 'PROTOCOL_MISMATCH',
+      }[semanticCode] ??
+      const {'接口协议不匹配': 'PROTOCOL_MISMATCH'}[technicalFact];
+}
+
 NormalizedError normalizeHttpError(
   int statusCode,
   dynamic responseBody,
@@ -259,19 +320,44 @@ NormalizedError normalizeHttpError(
     text = fallbackText;
   }
 
-  // 尝试从常见错误结构提取 message。
-  String? serverMessage;
-  if (map != null) {
-    final error = map['error'];
-    if (error is Map) {
-      serverMessage =
-          (error['message'] as String?) ?? (error['type'] as String?);
-    } else if (error is String) {
-      serverMessage = error;
-    }
-    serverMessage ??= (map['message'] as String?) ?? (map['detail'] as String?);
+  final serverMessage =
+      _providerResponseMessage(map) ??
+      (map == null && responseBody is String ? responseBody : null);
+  final providerMessage = safeProviderMessage(serverMessage);
+  // Preserve only fixed technical facts when an error echoes a request field.
+  // The original explanation still goes through the ordinary privacy filter.
+  final safeFact = providerTechnicalFact(statusCode, serverMessage);
+  final detail = _safePreview(safeFact ?? serverMessage ?? text);
+  if (_isContentPolicyViolation(map)) {
+    return NormalizedError(
+      'CONTENT_POLICY_VIOLATION',
+      '请求内容未通过服务商审核',
+      statusCode: statusCode,
+      detail: detail,
+      providerMessage: providerMessage,
+    );
   }
 
+  if (providerHasNoChannel(statusCode, serverMessage)) {
+    return NormalizedError(
+      'MODEL_CHANNEL_UNAVAILABLE',
+      '当前模型暂无可用渠道，请更换模型或稍后重试。',
+      statusCode: statusCode,
+      detail: '当前模型暂无可用渠道',
+      providerMessage: providerMessage,
+    );
+  }
+
+  final semantic = _providerSemanticCode(map, statusCode, safeFact);
+  if (semantic != null) {
+    return NormalizedError(
+      semantic,
+      '模型服务拒绝了本次请求',
+      statusCode: statusCode,
+      detail: detail,
+      providerMessage: providerMessage,
+    );
+  }
   switch (statusCode) {
     case 401:
     case 403:
@@ -279,36 +365,71 @@ NormalizedError normalizeHttpError(
         'AUTH_FAILED',
         '认证失败，请检查 API Key',
         statusCode: statusCode,
-        detail: _safePreview(serverMessage ?? text),
+        detail: detail,
+        providerMessage: providerMessage,
       );
     case 402:
       return NormalizedError(
         'ACCOUNT_BILLING',
         '服务商账户、余额或额度异常',
         statusCode: statusCode,
-        detail: _safePreview(serverMessage ?? text),
+        detail: detail,
+        providerMessage: providerMessage,
       );
     case 404:
       return NormalizedError(
         'ENDPOINT_NOT_FOUND',
         '接口地址不存在，请检查 Base URL',
         statusCode: statusCode,
-        detail: _safePreview(serverMessage ?? text),
+        detail: detail,
+        providerMessage: providerMessage,
       );
     case 429:
       return NormalizedError(
         'RATE_LIMITED',
         '请求过于频繁，本次结果未确认',
         statusCode: statusCode,
-        detail: _safePreview(serverMessage ?? text),
+        detail: detail,
+        providerMessage: providerMessage,
       );
     case 400:
+      final error = map?['error'];
+      final explicit = error is Map
+          ? error['code'] ?? error['type']
+          : map?['code'];
+      if (!const {
+            'invalid_request_error',
+            'invalid_request',
+            'invalid_parameter',
+            'unsupported_parameter',
+            'model_not_found',
+          }.contains(explicit) &&
+          safeFact == null &&
+          !RegExp(
+            r'parameter|model|参数|模型|response_?format|output format|tool_choice|responseSchema|responseMimeType|input_audio|\bschema\b',
+            caseSensitive: false,
+          ).hasMatch(serverMessage ?? '')) {
+        return NormalizedError(
+          'HTTP_ERROR',
+          '模型请求失败，请查看服务商说明',
+          statusCode: statusCode,
+          providerMessage: providerMessage,
+        );
+      }
+      return NormalizedError(
+        'INVALID_REQUEST',
+        '请求参数被服务拒绝',
+        statusCode: statusCode,
+        detail: detail,
+        providerMessage: providerMessage,
+      );
     case 422:
       return NormalizedError(
         'INVALID_REQUEST',
         '请求参数被服务拒绝',
         statusCode: statusCode,
-        detail: _safePreview(serverMessage ?? text),
+        detail: detail,
+        providerMessage: providerMessage,
       );
     default:
       if (statusCode >= 500) {
@@ -316,16 +437,31 @@ NormalizedError normalizeHttpError(
           'SERVER_ERROR',
           '模型服务暂时不可用，本次结果未确认',
           statusCode: statusCode,
-          detail: _safePreview(serverMessage ?? text),
+          detail: detail,
+          providerMessage: providerMessage,
         );
       }
       return NormalizedError(
         'HTTP_ERROR',
         '请求失败（HTTP $statusCode）',
         statusCode: statusCode,
-        detail: _safePreview(serverMessage ?? text),
+        detail: detail,
+        providerMessage: providerMessage,
       );
   }
+}
+
+bool _isContentPolicyViolation(Map? response) {
+  final error = response?['error'];
+  final code = error is Map
+      ? error['code'] ?? error['type']
+      : response?['code'];
+  return const {
+    'content_policy_violation',
+    'content_filter',
+    'content_policy',
+    'safety_violation',
+  }.contains(code);
 }
 
 /// 面向诊断与能力判定的安全错误说明。服务端细节已经在
@@ -333,11 +469,13 @@ NormalizedError normalizeHttpError(
 String diagnosticErrorDetail(
   NormalizedError error, {
   Iterable<String> secrets = const [],
+  Object? requestPayload,
 }) {
-  var detail = error.detail?.trim() ?? '';
-  for (final secret in secrets) {
-    if (secret.isNotEmpty) detail = detail.replaceAll(secret, '[已隐藏]');
-  }
+  final detail = safeProviderMessage(
+    error.detail,
+    secrets: secrets,
+    requestPayload: requestPayload,
+  );
   return detail.isEmpty ? error.message : '${error.message}：$detail';
 }
 
@@ -359,4 +497,48 @@ String sanitizeEndpoint(String url) {
   final q = url.indexOf('?');
   if (q < 0) return url;
   return url.substring(0, q);
+}
+
+String diagnosticProviderMessage(
+  NormalizedError error, {
+  Iterable<String> secrets = const [],
+  Object? requestPayload,
+}) => safeProviderMessage(
+  error.providerMessage,
+  secrets: secrets,
+  requestPayload: requestPayload,
+);
+
+NormalizedError? streamProviderError(
+  Iterable<SseFrame> frames,
+  String terminationReason, {
+  Iterable<String> secrets = const [],
+  Object? requestPayload,
+}) {
+  for (final frame in frames) {
+    final data =
+        frame.data['response'] is Map &&
+            (frame.data['response'] as Map)['error'] != null
+        ? (frame.data['response'] as Map)
+        : frame.data;
+    if (data['error'] != null ||
+        frame.eventType == 'error' ||
+        data['type'] == 'error') {
+      final error = normalizeHttpError(200, data, '服务商中断了请求');
+      return NormalizedError(
+        error.code,
+        error.message,
+        statusCode: error.statusCode,
+        providerMessage: diagnosticProviderMessage(
+          error,
+          secrets: secrets,
+          requestPayload: requestPayload,
+        ),
+      );
+    }
+  }
+  if (terminationReason.contains('content_filter')) {
+    return const NormalizedError('CONTENT_POLICY_VIOLATION', '请求内容未通过服务商审核');
+  }
+  return null;
 }

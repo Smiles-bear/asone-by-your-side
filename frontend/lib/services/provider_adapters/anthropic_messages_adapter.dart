@@ -1,10 +1,12 @@
-import 'dart:convert';
+import 'prompt_context_layout.dart';
 
 import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
 import 'adapter_types.dart';
 import 'adapter_helpers.dart';
 import 'protocol_types.dart';
+import 'provider_response_aggregation.dart';
+import 'tool_argument_parser.dart';
 
 /// Anthropic Messages API 适配器（/v1/messages）。
 ///
@@ -64,7 +66,7 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
   Map<String, Object?> _convertMessages(List<Map<String, Object?>> messages) {
     final systemParts = <String>[];
     final converted = <Map<String, Object?>>[];
-    for (final message in messages) {
+    for (final message in layoutPromptContext(messages)) {
       final role = (message['role'] as String?) ?? 'user';
       final content = message['content'] ?? '';
 
@@ -92,90 +94,101 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
 
       final targetRole = role == 'assistant' ? 'assistant' : 'user';
       final blocks = <Map<String, Object?>>[];
-
-      if (content is String) {
-        blocks.add({'type': 'text', 'text': content});
-      } else if (content is List) {
-        for (final part in content) {
-          if (part is! Map) continue;
-          final type = part['type'];
-          if (type == 'text' || type == 'input_text') {
-            blocks.add({'type': 'text', 'text': part['text'] ?? ''});
-          } else if (type == 'image_url' || type == 'input_image') {
-            final raw = part['image_url'];
-            final url = raw is Map ? (raw['url'] as String?) : (raw as String?);
-            if (url != null &&
-                url.startsWith('data:') &&
-                url.contains(';base64,')) {
-              final comma = url.indexOf(',');
-              final header = url.substring(5, url.indexOf(';'));
-              final encoded = url.substring(comma + 1);
-              final mediaType = header.isEmpty ? 'image/jpeg' : header;
-              blocks.add({
-                'type': 'image',
-                'source': {
-                  'type': 'base64',
-                  'media_type': mediaType,
-                  'data': encoded,
-                },
-              });
-            } else if (url != null && url.isNotEmpty) {
-              blocks.add({
-                'type': 'image',
-                'source': {'type': 'url', 'url': url},
-              });
-            }
-          } else if (type == 'file_data') {
-            final data = part['data'] as String?;
-            if (data != null && data.isNotEmpty) {
-              blocks.add({
-                'type': 'document',
-                'source': {
-                  'type': 'base64',
-                  'media_type': part['mime_type'] ?? 'application/pdf',
-                  'data': data,
-                },
-              });
-            }
-          }
-        }
+      final native = message['_provider_continuation'];
+      if (role == 'assistant' &&
+          native is Map &&
+          native['protocol'] == protocolType &&
+          native['items'] is List) {
+        blocks.addAll(
+          (native['items'] as List).whereType<Map>().map(
+            (item) => item.cast<String, Object?>(),
+          ),
+        );
+        converted.add({'role': targetRole, 'content': blocks});
+        continue;
       }
+
+      _appendContentBlocks(content, blocks);
 
       // 处理 assistant 消息的 tool_calls
       if (role == 'assistant' && message['tool_calls'] != null) {
-        final toolCalls = message['tool_calls'] as List?;
-        if (toolCalls != null) {
-          for (final call in toolCalls) {
-            if (call is! Map) continue;
-            final func = call['function'] as Map?;
-            if (func == null) continue;
-            final name = func['name'] as String?;
-            final argsStr = func['arguments'] as String?;
-            if (name == null) continue;
-
-            Map<String, dynamic> input = {};
-            if (argsStr != null && argsStr.isNotEmpty) {
-              try {
-                final decoded = jsonDecode(argsStr);
-                if (decoded is Map) {
-                  input = Map<String, dynamic>.from(decoded);
-                }
-              } catch (_) {}
-            }
-
-            blocks.add({
-              'type': 'tool_use',
-              'id': call['id'] ?? name,
-              'name': name,
-              'input': input,
-            });
-          }
-        }
+        _appendToolCallBlocks(message['tool_calls'], blocks);
       }
 
       converted.add({'role': targetRole, 'content': blocks});
     }
     return {'system': systemParts.join('\n\n'), 'messages': converted};
+  }
+
+  void _appendContentBlocks(Object content, List<Map<String, Object?>> blocks) {
+    if (content is String) {
+      blocks.add({'type': 'text', 'text': content});
+    } else if (content is List) {
+      for (final part in content) {
+        if (part is! Map) continue;
+        final type = part['type'];
+        if (type == 'text' || type == 'input_text') {
+          blocks.add({'type': 'text', 'text': part['text'] ?? ''});
+        } else if (type == 'image_url' || type == 'input_image') {
+          final image = _imageBlock(part['image_url']);
+          if (image != null) blocks.add(image);
+        } else if (type == 'file_data') {
+          final data = part['data'] as String?;
+          if (data != null && data.isNotEmpty) {
+            blocks.add({
+              'type': 'document',
+              'source': {
+                'type': 'base64',
+                'media_type': part['mime_type'] ?? 'application/pdf',
+                'data': data,
+              },
+            });
+          }
+        }
+      }
+    }
+  }
+
+  Map<String, Object?>? _imageBlock(Object? raw) {
+    final url = raw is Map ? (raw['url'] as String?) : (raw as String?);
+    if (url != null && url.startsWith('data:') && url.contains(';base64,')) {
+      final comma = url.indexOf(',');
+      final header = url.substring(5, url.indexOf(';'));
+      final encoded = url.substring(comma + 1);
+      final mediaType = header.isEmpty ? 'image/jpeg' : header;
+      return {
+        'type': 'image',
+        'source': {'type': 'base64', 'media_type': mediaType, 'data': encoded},
+      };
+    } else if (url != null && url.isNotEmpty) {
+      return {
+        'type': 'image',
+        'source': {'type': 'url', 'url': url},
+      };
+    }
+    return null;
+  }
+
+  void _appendToolCallBlocks(Object? value, List<Map<String, Object?>> blocks) {
+    final toolCalls = value as List?;
+    if (toolCalls == null) return;
+    for (final call in toolCalls) {
+      if (call is! Map) continue;
+      final func = call['function'] as Map?;
+      if (func == null) continue;
+      final name = func['name'] as String?;
+      final argsStr = func['arguments'] as String?;
+      if (name == null) continue;
+
+      final input = requireToolArguments(argsStr);
+
+      blocks.add({
+        'type': 'tool_use',
+        'id': call['id'] ?? name,
+        'name': name,
+        'input': input,
+      });
+    }
   }
 
   Map<String, Object?> _payload(
@@ -269,13 +282,12 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
       maxTokens: maxTokens,
       temperature: temperature,
     );
-    if (contract.reasoningPolicy != ModelReasoningPolicy.providerDefault) {
-      final outputConfig = Map<String, Object?>.from(
-        payload['output_config'] as Map? ?? const {},
-      );
-      outputConfig['effort'] = 'low';
-      payload['output_config'] = outputConfig;
-    }
+    applyOutputContractPolicy(
+      payload,
+      protocol: protocolType,
+      providerId: providerId ?? '',
+      contract: contract,
+    );
     final schema = contract.schema;
     if (contract.requiresStructuredData && schema != null) {
       if (structuredTransport == StructuredOutputTransport.forcedTool) {
@@ -326,23 +338,22 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
   }
 
   @override
-  List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) {
+  List<ProviderToolCall> extractToolCalls(Map<dynamic, dynamic> payload) =>
+      _receivedCalls(aggregateProviderPayload(this, payload));
+
+  @override
+  Map<String, Object?>? extractNativeContinuation(
+    Map<dynamic, dynamic> payload,
+  ) {
     final content = payload['content'];
-    if (content is! List) return const [];
-    final calls = <ProviderToolCall>[];
-    for (final part in content) {
-      if (part is! Map || part['type'] != 'tool_use') continue;
-      final name = (part['name'] as String?) ?? '';
-      if (name.isEmpty) continue;
-      calls.add(
-        ProviderToolCall(
-          id: (part['id'] as String?) ?? name,
-          name: name,
-          arguments: _parseArguments(part['input']),
-        ),
-      );
-    }
-    return calls;
+    if (content is! List || content.isEmpty) return null;
+    return <String, Object?>{
+      'protocol': protocolType,
+      'items': content
+          .whereType<Map>()
+          .map((item) => Map<String, Object?>.from(item))
+          .toList(),
+    };
   }
 
   @override
@@ -385,9 +396,13 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
     final kind = frame.eventType.isNotEmpty
         ? frame.eventType
         : frame.data['type']?.toString() ?? '';
-    if (kind == 'message_delta') {
+    if (kind == 'message_delta' ||
+        kind == 'message' ||
+        (frame.data['content'] is List && frame.data['stop_reason'] != null)) {
       final delta = frame.data['delta'];
-      final stopReason = delta is Map ? delta['stop_reason']?.toString() : null;
+      final stopReason = delta is Map
+          ? delta['stop_reason']?.toString()
+          : frame.data['stop_reason']?.toString();
       if (stopReason == 'end_turn' ||
           stopReason == 'stop_sequence' ||
           stopReason == 'tool_use') {
@@ -409,64 +424,13 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
   }
 
   @override
-  List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) {
-    // Anthropic 流式工具调用：
-    // 1. content_block_start (type=tool_use) 包含 id 和 name
-    // 2. content_block_delta (type=input_json_delta) 累积 input JSON
-    final toolBlocks = <String, Map<String, dynamic>>{};
+  List<ProviderToolCall> streamExtractToolCalls(List<SseFrame> frames) =>
+      _receivedCalls(aggregateProviderFrames(this, frames));
 
-    for (final frame in frames) {
-      final kind = frame.eventType.isNotEmpty
-          ? frame.eventType
-          : (frame.data['type'] as String?) ?? '';
-
-      if (kind == 'content_block_start') {
-        final block = frame.data['content_block'];
-        if (block is Map && block['type'] == 'tool_use') {
-          final id = (block['id'] as String?) ?? '';
-          final name = (block['name'] as String?) ?? '';
-          if (id.isNotEmpty && name.isNotEmpty) {
-            toolBlocks[id] = {'name': name, 'input_json': ''};
-          }
-        }
-      } else if (kind == 'content_block_delta') {
-        final delta = frame.data['delta'];
-        if (delta is Map && delta['type'] == 'input_json_delta') {
-          final index = frame.data['index'] as int?;
-          if (index != null) {
-            // 通过 index 找到对应的 tool block（按顺序）
-            final keys = toolBlocks.keys.toList();
-            if (index < keys.length) {
-              final id = keys[index];
-              final partial = (delta['partial_json'] as String?) ?? '';
-              toolBlocks[id]!['input_json'] =
-                  (toolBlocks[id]!['input_json'] as String) + partial;
-            }
-          }
-        }
-      }
-    }
-
-    final calls = <ProviderToolCall>[];
-    for (final entry in toolBlocks.entries) {
-      final id = entry.key;
-      final name = entry.value['name'] as String;
-      final inputJson = entry.value['input_json'] as String;
-
-      Map<String, dynamic> arguments = {};
-      if (inputJson.isNotEmpty) {
-        try {
-          arguments = _parseArguments(jsonDecode(inputJson));
-        } catch (_) {
-          // JSON 解析失败，使用空参数
-        }
-      }
-
-      calls.add(ProviderToolCall(id: id, name: name, arguments: arguments));
-    }
-
-    return calls;
-  }
+  @override
+  Map<String, Object?>? streamExtractNativeContinuation(
+    List<SseFrame> frames,
+  ) => aggregateProviderFrames(this, frames).nativeContinuation;
 
   @override
   Map<String, Object?> toolProbePayload(
@@ -474,6 +438,7 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
     String toolName,
     String instruction, {
     String? providerId,
+    String expectedCode = 'AZ731',
   }) {
     final payload = _payload(
       modelId,
@@ -493,7 +458,7 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
           'properties': {
             'code': {
               'type': 'string',
-              'enum': ['AZ731'],
+              'enum': [expectedCode],
             },
           },
           'required': ['code'],
@@ -536,14 +501,22 @@ class AnthropicMessagesAdapter extends ModelProtocolAdapter {
     return payload;
   }
 
-  Map<String, Object?> _parseArguments(dynamic raw) {
-    if (raw is Map) return Map<String, Object?>.from(raw);
-    if (raw is String) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) return Map<String, Object?>.from(decoded);
-      } catch (_) {}
+  // Legacy extraction returns reception data; dispatch gates use the shared result.
+  List<ProviderToolCall> _receivedCalls(ProviderResponse response) {
+    if (response.toolReceptions.any(
+          (tool) => tool.state != ProviderToolArgumentState.valid,
+        ) ||
+        response.parsingIssues.isNotEmpty) {
+      throw const FormatException('invalid_tool_reception');
     }
-    return {};
+    return [
+      for (final tool in response.toolReceptions)
+        ProviderToolCall(
+          id: tool.id,
+          nativeId: tool.nativeId,
+          name: tool.name,
+          arguments: tool.arguments!,
+        ),
+    ];
   }
 }

@@ -7,6 +7,7 @@ import '../theme/asone_theme.dart';
 import 'asone_feedback.dart';
 import 'asone_icons.dart';
 import 'asone_line_asset_icon.dart';
+import 'chat_composer_leading_overlay.dart';
 
 class AsOneChatTextField extends StatelessWidget {
   const AsOneChatTextField({
@@ -14,16 +15,19 @@ class AsOneChatTextField extends StatelessWidget {
     required this.controller,
     this.focusNode,
     this.hintText = '发消息或按住说话...',
+    this.onTap,
   });
 
   final TextEditingController controller;
   final FocusNode? focusNode;
   final String hintText;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => TextField(
     focusNode: focusNode,
     controller: controller,
+    onTap: onTap,
     minLines: 1,
     maxLines: 5,
     textInputAction: TextInputAction.newline,
@@ -347,114 +351,127 @@ class _AsOneChatInputBarState extends State<AsOneChatInputBar> {
                   ),
                 ],
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  KeyedSubtree(
-                    key: widget.addButtonKey,
-                    child: GestureDetector(
-                      key: const Key('chat-add-button'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: widget.busy ? null : widget.onAdd,
-                      child: SizedBox(
-                        width: 40,
-                        height: 48,
-                        child: Center(
-                          child: Transform.translate(
-                            offset: const Offset(4, 0),
-                            child: widget.attachmentMenuOpen
-                                ? const AsOneIcon(
-                                    AsOneIconName.close,
-                                    color: AsOneTheme.iconAccent,
-                                  )
-                                : const AsOneIcon(AsOneIconName.add),
-                          ),
+              child: ChatComposerLeadingOverlay(
+                controller: widget.controller,
+                hintText: '发消息或按住说话...',
+                voiceMode: _voiceMode,
+                busy: widget.busy,
+                showSendWhenEmpty: widget.hasPendingAttachments,
+                leadingWidth: 42,
+                leading: KeyedSubtree(
+                  key: widget.addButtonKey,
+                  child: GestureDetector(
+                    key: const Key('chat-add-button'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.busy ? null : widget.onAdd,
+                    child: SizedBox(
+                      width: 40,
+                      height: 48,
+                      child: Center(
+                        child: Transform.translate(
+                          offset: const Offset(4, 0),
+                          child: widget.attachmentMenuOpen
+                              ? const AsOneIcon(
+                                  AsOneIconName.close,
+                                  color: AsOneTheme.iconAccent,
+                                )
+                              : const AsOneIcon(AsOneIconName.add),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 2),
-                  Expanded(
-                    child: _voiceMode
-                        ? GestureDetector(
-                            key: const Key('chat-hold-to-talk'),
-                            behavior: HitTestBehavior.opaque,
-                            onLongPressStart: _startVoicePress,
-                            onLongPressMoveUpdate: _moveVoicePress,
-                            onLongPressEnd: _finishVoicePress,
-                            onLongPressCancel: _cancelVoicePress,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 100),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: _recording
-                                    ? const Color(0x1FE78C71)
-                                    : Colors.transparent,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                _recording ? '松开结束' : '长按说话',
-                                style: TextStyle(
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const SizedBox(width: 40),
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: _voiceMode
+                          ? GestureDetector(
+                              key: const Key('chat-hold-to-talk'),
+                              behavior: HitTestBehavior.opaque,
+                              onLongPressStart: _startVoicePress,
+                              onLongPressMoveUpdate: _moveVoicePress,
+                              onLongPressEnd: _finishVoicePress,
+                              onLongPressCancel: _cancelVoicePress,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 100),
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
                                   color: _recording
-                                      ? const Color(0xFFE78C71)
-                                      : const Color(0xFF535353),
-                                  fontSize: 16,
-                                  letterSpacing: -0.48,
+                                      ? const Color(0x1FE78C71)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  _recording ? '松开结束' : '长按说话',
+                                  style: TextStyle(
+                                    color: _recording
+                                        ? const Color(0xFFE78C71)
+                                        : const Color(0xFF535353),
+                                    fontSize: 16,
+                                    letterSpacing: -0.48,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : AsOneChatTextField(
+                              focusNode: _focusNode,
+                              controller: widget.controller,
+                              onTap: widget.onInputTap,
+                            ),
+                    ),
+                    if (_voiceMode)
+                      GestureDetector(
+                        key: const Key('chat-keyboard-button'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _showKeyboardMode,
+                        child: const SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Center(
+                            child: AsOneIcon(AsOneIconName.keyboard),
+                          ),
+                        ),
+                      )
+                    else
+                      ValueListenableBuilder<TextEditingValue>(
+                        valueListenable: widget.controller,
+                        builder: (context, value, _) {
+                          final showSend =
+                              widget.busy ||
+                              widget.hasPendingAttachments ||
+                              value.text.trim().isNotEmpty;
+                          if (showSend) {
+                            return AsOneChatSendButton(
+                              controller: widget.controller,
+                              hasPendingAttachments:
+                                  widget.hasPendingAttachments,
+                              busy: widget.busy,
+                              onSend: widget.onSend,
+                              onStop: widget.onStop,
+                            );
+                          }
+                          return GestureDetector(
+                            key: const Key('chat-voice-button'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _showVoiceMode,
+                            child: Opacity(
+                              opacity: widget.voiceEnabled ? 1 : 0.45,
+                              child: const SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Center(
+                                  child: AsOneIcon(AsOneIconName.microphone),
                                 ),
                               ),
                             ),
-                          )
-                        : AsOneChatTextField(
-                            focusNode: _focusNode,
-                            controller: widget.controller,
-                          ),
-                  ),
-                  if (_voiceMode)
-                    GestureDetector(
-                      key: const Key('chat-keyboard-button'),
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _showKeyboardMode,
-                      child: const SizedBox(
-                        width: 48,
-                        height: 48,
-                        child: Center(child: AsOneIcon(AsOneIconName.keyboard)),
-                      ),
-                    )
-                  else
-                    ValueListenableBuilder<TextEditingValue>(
-                      valueListenable: widget.controller,
-                      builder: (context, value, _) {
-                        final showSend =
-                            widget.busy ||
-                            widget.hasPendingAttachments ||
-                            value.text.trim().isNotEmpty;
-                        if (showSend) {
-                          return AsOneChatSendButton(
-                            controller: widget.controller,
-                            hasPendingAttachments: widget.hasPendingAttachments,
-                            busy: widget.busy,
-                            onSend: widget.onSend,
-                            onStop: widget.onStop,
                           );
-                        }
-                        return GestureDetector(
-                          key: const Key('chat-voice-button'),
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _showVoiceMode,
-                          child: Opacity(
-                            opacity: widget.voiceEnabled ? 1 : 0.45,
-                            child: const SizedBox(
-                              width: 48,
-                              height: 48,
-                              child: Center(
-                                child: AsOneIcon(AsOneIconName.microphone),
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                ],
+                        },
+                      ),
+                  ],
+                ),
               ),
             ),
           ],

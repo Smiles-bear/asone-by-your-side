@@ -107,7 +107,7 @@ class DemoProfilePage extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const Text(
-            '聊天、群聊、模型服务和导入数据保存在本机；记忆、语音、设备控制和后台主动能力暂未开放。',
+            '聊天、群聊、记忆、模型服务和导入数据保存在本机；语音、设备控制和后台主动能力暂未开放。',
             style: TextStyle(fontSize: 13, height: 1.5),
           ),
           const SizedBox(height: 16),
