@@ -18,6 +18,7 @@ import 'structured_output_receiver.dart';
 import 'protocol_types.dart';
 import 'upstream_failure_policy.dart';
 import 'gemini_adapter.dart';
+import 'dashscope_response.dart';
 import '../debug_logger.dart';
 import '../model_endpoint.dart';
 import 'protocol_context_recorder.dart';
@@ -608,7 +609,7 @@ class ProtocolClient {
         try {
           response = await _dio.post<dynamic>(
             endpoint,
-            data: payload,
+            data: adapter.transportPayload(payload, baseUrl: endpoint),
             options: Options(
               headers: headers,
               connectTimeout: connectTimeout,
@@ -902,7 +903,9 @@ class ProtocolClient {
       }
       return payload['status']?.toString() ?? '';
     }
-    final choices = payload['choices'];
+    final choices = protocol == ProtocolType.dashscopeText
+        ? dashscopeChatPayload(payload)['choices']
+        : payload['choices'];
     if (choices is List && choices.isNotEmpty && choices.first is Map) {
       return (choices.first as Map)['finish_reason']?.toString() ?? '';
     }
@@ -923,7 +926,7 @@ class ProtocolClient {
     void Function(String delta)? onDelta,
   }) async {
     final watch = Stopwatch()..start();
-    final headers = adapter.headers(baseUrl, apiKey);
+    final headers = adapter.streamHeaders(baseUrl, apiKey);
     final payload = adapter.streamPayload(
       modelId,
       messages,
@@ -961,7 +964,7 @@ class ProtocolClient {
       try {
         response = await _dio.post<ResponseBody>(
           endpoint,
-          data: payload,
+          data: adapter.transportPayload(payload, baseUrl: endpoint),
           options: Options(
             responseType: ResponseType.stream,
             headers: headers,
@@ -1201,7 +1204,7 @@ class ProtocolClient {
     if (adapter is GeminiAdapter) {
       return [adapter.generateContentEndpoint(baseUrl, modelId)];
     }
-    return adapter.candidateEndpoints(baseUrl);
+    return adapter.requestEndpoints(baseUrl, modelId);
   }
 
   List<String> _streamEndpoints(
@@ -1212,7 +1215,7 @@ class ProtocolClient {
     if (adapter is GeminiAdapter) {
       return [adapter.streamGenerateContentEndpoint(baseUrl, modelId)];
     }
-    return adapter.candidateEndpoints(baseUrl);
+    return adapter.requestEndpoints(baseUrl, modelId);
   }
 
   String? _contentType(Response? response) {

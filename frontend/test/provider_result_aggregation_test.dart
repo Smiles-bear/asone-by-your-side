@@ -12,7 +12,8 @@ import 'package:azruiyoi_community/services/provider_adapters/tool_argument_pars
 
 void main() {
   final registry = AdapterRegistry.instance;
-  for (final protocol in ProtocolType.allProtocols) {
+  // This matrix checks signed tool continuation, not basic text transport.
+  for (final protocol in ProtocolType.autoCandidates) {
     test(
       '$protocol native JSON and byte-split SSE have identical results',
       () async {
@@ -72,6 +73,44 @@ void main() {
       },
     );
   }
+
+  test(
+    'DashScope JSON and byte-split native SSE preserve text and usage',
+    () async {
+      final adapter = registry.get(ProtocolType.dashscopeText);
+      final payload = {
+        'output': {
+          'choices': [
+            {
+              'message': {
+                'content': [
+                  {'text': '回答'},
+                ],
+                'reasoning_content': '思考',
+              },
+              'finish_reason': 'stop',
+            },
+          ],
+        },
+        'usage': {'input_tokens': 13, 'output_tokens': 5},
+      };
+      final body = jsonEncode(payload);
+      for (final wire in [body, 'data: $body\n\ndata: [DONE]\n\n']) {
+        final aggregate = ProviderResultAggregator(adapter: adapter);
+        final decoded = await decodeIncrementalSse(
+          adapter: adapter,
+          stream: Stream.fromIterable(utf8.encode(wire).map((byte) => [byte])),
+          onFrame: aggregate.addFrame,
+        );
+        final result = aggregate.finish(terminal: decoded.terminal);
+        expect(result.text, '回答');
+        expect(result.reasoning, '思考');
+        expect(result.usage, containsPair('completion_tokens', 5));
+        expect(result.terminalState, ProviderTerminalState.completed);
+        expect(result.parsingIssues, isEmpty);
+      }
+    },
+  );
 
   test(
     'Chat delta and full message complete text, reasoning and tools once',

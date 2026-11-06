@@ -39,6 +39,10 @@ String joinEndpoint(String baseUrl, String path) {
 /// 标准 OpenAI 兼容地址优先补 `/v1`，失败后再回退原始拼接。
 /// 仅当原始路径不含 /v1 时才补 /v1 变体。
 List<String> endpointVariants(String baseUrl, String path) {
+  final normalized = baseUrl.trim().replaceFirst(RegExp(r'/+$'), '');
+  if (Uri.tryParse(normalized)?.path.endsWith('/$path') == true) {
+    return [normalized];
+  }
   final primary = joinEndpoint(baseUrl, path);
   final base = baseUrl.trim();
   final hasV1 = base.contains('/v1') || base.endsWith('/v1');

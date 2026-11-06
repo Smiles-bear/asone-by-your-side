@@ -7,6 +7,7 @@ const modelProtocolLabels = {
   ProtocolType.openaiResponses: 'OpenAI Responses',
   ProtocolType.anthropicMessages: 'Anthropic Messages',
   ProtocolType.gemini: 'Gemini',
+  ProtocolType.dashscopeText: 'DashScope 原生',
 };
 
 class ModelProtocolPreferenceField extends StatelessWidget {

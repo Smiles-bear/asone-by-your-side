@@ -1,4 +1,5 @@
 import 'provider_adapters/protocol_types.dart';
+import 'provider_adapters/native_protocol_policy.dart';
 
 class ModelEndpointException implements Exception {
   const ModelEndpointException(this.message);
@@ -37,6 +38,23 @@ Uri modelEndpointUri(String rawBaseUrl, String endpoint) {
 /// 协议版本路径属于协议本身，不应要求用户为不同中转站手动补齐。
 String protocolModelBaseUrl(String rawBaseUrl, String protocol) {
   final base = normalizeModelBaseUrl(rawBaseUrl);
+  if (protocol == ProtocolType.dashscopeText) {
+    final uri = Uri.parse(base);
+    final path = uri.path;
+    if (path.isEmpty || path == '/v1') {
+      return uri.replace(path: '/api/v1').toString();
+    }
+    const compatiblePath = '/compatible-mode/v1';
+    if (path.endsWith(compatiblePath)) {
+      return uri
+          .replace(
+            path:
+                '${path.substring(0, path.length - compatiblePath.length)}/api/v1',
+          )
+          .toString();
+    }
+    return base;
+  }
   if (protocol != ProtocolType.gemini) return base;
   final uri = Uri.parse(base);
   var path = uri.path;
@@ -62,14 +80,8 @@ List<String> modelProtocolCandidates({
     throw const ModelEndpointException('请选择有效的接口协议');
   }
   if (preference != ProtocolType.auto) return [preference];
-  final path = Uri.parse(normalizeModelBaseUrl(baseUrl)).path;
-  final candidates = List<String>.of(ProtocolType.autoCandidates);
-  if (path.endsWith('/v1beta')) {
-    candidates.remove(ProtocolType.gemini);
-    candidates.insert(0, ProtocolType.gemini);
-  } else if (!path.endsWith('/v1') && isGeminiModel(modelId)) {
-    candidates.remove(ProtocolType.gemini);
-    candidates.insert(1, ProtocolType.gemini);
-  }
-  return candidates;
+  return nativeProtocolCandidates(
+    baseUrl: normalizeModelBaseUrl(baseUrl),
+    modelId: modelId,
+  );
 }

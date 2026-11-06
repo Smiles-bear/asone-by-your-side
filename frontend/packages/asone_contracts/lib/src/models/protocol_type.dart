@@ -1,7 +1,6 @@
 /// 协议类型常量与候选顺序。
 ///
-/// 移植自桌面 AsOne `model_services/templates.py`，移动端精简为四协议：
-/// openai_chat / openai_responses / anthropic_messages / gemini。
+/// 通用候选为四协议；Qwen 可额外优先尝试 DashScope 原生协议。
 /// Azure OpenAI 暂缓（移动端无部署名字段）。
 class ProtocolType {
   ProtocolType._();
@@ -27,6 +26,8 @@ class ProtocolType {
   /// 覆盖：Google Gemini 官方 Key。
   static const gemini = 'gemini';
 
+  static const dashscopeText = 'dashscope_text';
+
   /// auto 模式下的候选尝试顺序。
   static const List<String> autoCandidates = [
     openaiChat,
@@ -41,6 +42,7 @@ class ProtocolType {
     openaiResponses,
     anthropicMessages,
     gemini,
+    dashscopeText,
   ];
 
   static bool isValid(String value) =>

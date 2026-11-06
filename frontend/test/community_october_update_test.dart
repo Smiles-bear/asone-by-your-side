@@ -30,8 +30,8 @@ void main() {
       modelProtocolCandidates(
         baseUrl: 'https://relay.test/v1',
         modelId: 'gemini-test',
-      ).first,
-      ProtocolType.openaiChat,
+      ).take(2),
+      [ProtocolType.gemini, ProtocolType.openaiChat],
     );
     expect(
       () => modelProtocolCandidates(

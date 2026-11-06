@@ -158,10 +158,17 @@ bool isProviderJsonPayload(String protocol, Map payload) {
   if ((payload.containsKey('choices') && protocol != ProtocolType.openaiChat) ||
       (payload.containsKey('candidates') && protocol != ProtocolType.gemini) ||
       (payload.containsKey('output') &&
-          protocol != ProtocolType.openaiResponses)) {
+          protocol != ProtocolType.openaiResponses &&
+          protocol != ProtocolType.dashscopeText)) {
     return false;
   }
   return switch (protocol) {
+    ProtocolType.dashscopeText =>
+      (payload['output'] is Map &&
+              (payload['output'] as Map)['choices'] is List) ||
+          (payload['code'] is String &&
+              payload['code'] != '' &&
+              payload['code'] != 'Success'),
     ProtocolType.openaiChat =>
       payload['choices'] is List &&
           (payload['choices'] as List).every(

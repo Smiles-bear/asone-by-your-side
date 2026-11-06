@@ -17,8 +17,19 @@ abstract class ModelProtocolAdapter {
   /// 返回候选列表：主端点 + /v1 变体（用于 404 自动补试）。
   List<String> candidateEndpoints(String baseUrl);
 
+  List<String> requestEndpoints(String baseUrl, String modelId) =>
+      candidateEndpoints(baseUrl);
+
   /// 鉴权与协议头。
   Map<String, String> headers(String baseUrl, String apiKey);
+
+  Map<String, String> streamHeaders(String baseUrl, String apiKey) =>
+      headers(baseUrl, apiKey);
+
+  Map<String, Object?> transportPayload(
+    Map<String, Object?> payload, {
+    String? baseUrl,
+  }) => payload;
 
   /// 构造非流式文本请求体。
   Map<String, Object?> textPayload(

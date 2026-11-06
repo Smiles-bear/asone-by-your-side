@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:asone_contracts/asone_contracts.dart';
 import 'package:azruiyoi_community/local_core/core_database.dart';
+import 'package:azruiyoi_community/services/model_endpoint.dart';
 import 'package:azruiyoi_community/services/provider_adapters/adapter_helpers.dart';
 import 'package:azruiyoi_community/services/provider_adapters/incremental_sse_decoder.dart';
 import 'package:azruiyoi_community/services/provider_adapters/openai_chat_adapter.dart';
@@ -19,6 +20,7 @@ class _ScriptedChatAdapter implements HttpClientAdapter {
   final List<String> responses;
   final List<int> statuses;
   final requests = <Map<String, Object?>>[];
+  final optionsSeen = <RequestOptions>[];
 
   @override
   Future<ResponseBody> fetch(
@@ -26,6 +28,7 @@ class _ScriptedChatAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    optionsSeen.add(options);
     requests.add(Map<String, Object?>.from(options.data as Map));
     return ResponseBody.fromString(
       responses[(requests.length - 1).clamp(0, responses.length - 1)],
@@ -78,6 +81,8 @@ _openChat(
   List<String> responses, {
   String providerId = 'openai',
   String model = 'test-model',
+  String baseUrl = 'https://api.example.test/v1',
+  String protocol = ProtocolType.openaiChat,
   List<int> statuses = const [],
 }) async {
   final root = await Directory.systemTemp.createTemp('community-sync-');
@@ -96,11 +101,11 @@ _openChat(
   await core.open();
   final service = await core.modelServices.createModelService({
     'name': '回归服务',
-    'base_url': 'https://api.example.test/v1',
+    'base_url': baseUrl,
     'api_key': 'test-key',
     'model': model,
     'provider_id': providerId,
-    'protocol_type': ProtocolType.openaiChat,
+    'protocol_type': protocol,
   });
   final assistant = await core.ensureAssistantForService(service);
   final conversation = await core.conversations.createConversation(
@@ -134,6 +139,134 @@ Future<String?> _send(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  const qwenBase = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+  const qwenRoute =
+      'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation';
+
+  Map<String, Object?> dashscopeReply(String text, String stop) => {
+    'output': {
+      'choices': [
+        {
+          'message': {'role': 'assistant', 'content': text},
+          'finish_reason': stop,
+        },
+      ],
+    },
+    'usage': {'input_tokens': 30, 'output_tokens': 5},
+  };
+
+  test('自动优先原生协议，显式协议和完整接口不改写', () {
+    expect(
+      modelProtocolCandidates(baseUrl: qwenBase, modelId: 'qwen-plus').first,
+      ProtocolType.dashscopeText,
+    );
+    expect(
+      modelProtocolCandidates(
+        baseUrl: 'https://relay.example.test/v1',
+        modelId: 'claude-sonnet',
+      ).first,
+      ProtocolType.anthropicMessages,
+    );
+    expect(
+      modelProtocolCandidates(
+        baseUrl: qwenBase,
+        modelId: 'qwen-plus',
+        preference: ProtocolType.openaiChat,
+      ),
+      [ProtocolType.openaiChat],
+    );
+    expect(
+      modelProtocolCandidates(
+        baseUrl: '$qwenBase/chat/completions',
+        modelId: 'qwen-plus',
+      ),
+      [ProtocolType.openaiChat],
+    );
+    expect(
+      OpenAIChatAdapter().candidateEndpoints('$qwenBase/chat/completions'),
+      ['$qwenBase/chat/completions'],
+    );
+  });
+
+  test('DashScope 自动探测使用原生非流式请求', () async {
+    final adapter = _ScriptedChatAdapter([
+      jsonEncode(dashscopeReply('OK', 'stop')),
+    ]);
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+    final result = await ProtocolClient(dio: dio).resolveProtocol(
+      baseUrl: qwenBase,
+      apiKey: 'test-key',
+      modelId: 'qwen-plus',
+    );
+    expect(result.success, isTrue);
+    expect(result.protocol, ProtocolType.dashscopeText);
+    expect(adapter.optionsSeen.single.uri.toString(), qwenRoute);
+    expect(adapter.optionsSeen.single.headers['X-DashScope-SSE'], isNull);
+    expect(adapter.requests.single['input'], isA<Map>());
+    expect(
+      adapter.requests.single['parameters'],
+      containsPair('max_tokens', 128),
+    );
+    expect(result.textResult?.usage, containsPair('completion_tokens', 5));
+  });
+
+  test('中转不支持 DashScope 时自动回退原来的兼容协议', () async {
+    final adapter = _ScriptedChatAdapter(
+      [
+        '{"error":{"message":"Unknown endpoint"}}',
+        '{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}',
+      ],
+      statuses: [404, 200],
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+    final result = await ProtocolClient(dio: dio).resolveProtocol(
+      baseUrl: 'https://relay.example.test/v1',
+      apiKey: 'test-key',
+      modelId: 'qwen-plus',
+    );
+    expect(result.success, isTrue);
+    expect(result.protocol, ProtocolType.openaiChat);
+    expect(adapter.optionsSeen.map((options) => options.uri.path), [
+      '/api/v1/services/aigc/text-generation/generation',
+      '/v1/chat/completions',
+    ]);
+  });
+
+  test('DashScope 原生 SSE 增量展示并写入社区对话', () async {
+    final fixture = await _openChat(
+      [
+        'data: ${jsonEncode(dashscopeReply('你', 'null'))}\n\n'
+            'data: ${jsonEncode(dashscopeReply('好', 'stop'))}\n\n'
+            'data: [DONE]\n\n',
+      ],
+      providerId: 'qwen',
+      model: 'qwen-plus',
+      baseUrl: qwenBase,
+      protocol: ProtocolType.dashscopeText,
+    );
+    final deltas = StringBuffer();
+    expect(
+      await _send(fixture.core, fixture.conversationId, onDelta: deltas.write),
+      isNull,
+    );
+    expect(deltas.toString(), '你好');
+    final request = fixture.adapter.optionsSeen.single;
+    expect(request.uri.toString(), qwenRoute);
+    expect(request.headers['X-DashScope-SSE'], 'enable');
+    final payload = fixture.adapter.requests.single;
+    expect(payload['input'], isA<Map>());
+    expect(payload['parameters'], containsPair('incremental_output', true));
+    expect(payload.containsKey('messages'), isFalse);
+    await fixture.database.close();
+    final saved = (await fixture.core.messages.getMessages(
+      fixture.conversationId,
+    )).last;
+    expect(saved.content, '你好');
+    expect(saved.answerStatus, MessageAnswerStatus.completed);
+  });
 
   test('社区实际聊天接受流式请求返回的完整 JSON', () async {
     final fixture = await _openChat([

@@ -1465,7 +1465,7 @@ class LocalChatService {
   }) async {
     final watch = Stopwatch()..start();
     final base = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
-    final headers = adapter.headers(base, apiKey);
+    final headers = adapter.streamHeaders(base, apiKey);
     final payload = adapter.streamPayload(
       model,
       messages,
@@ -1491,7 +1491,7 @@ class LocalChatService {
 
     final endpoints = adapter is GeminiAdapter
         ? [adapter.streamGenerateContentEndpoint(base, model)]
-        : adapter.candidateEndpoints(base);
+        : adapter.requestEndpoints(base, model);
 
     Response<ResponseBody>? response;
     String? usedEndpoint;
@@ -1501,7 +1501,7 @@ class LocalChatService {
         try {
           response = await _dio.post<ResponseBody>(
             endpoint,
-            data: payload,
+            data: adapter.transportPayload(payload, baseUrl: endpoint),
             options: Options(
               responseType: ResponseType.stream,
               headers: headers,

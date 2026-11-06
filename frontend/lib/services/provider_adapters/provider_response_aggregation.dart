@@ -7,6 +7,7 @@ import 'protocol_types.dart';
 import 'provider_usage.dart';
 import 'response_framing.dart';
 import 'tool_argument_parser.dart';
+import 'dashscope_response.dart';
 
 /// One response, one owner. Both streaming and JSON callers use this API.
 /// No dispatch occurs here; only [ProviderResponse.toolCalls] is dispatchable.
@@ -69,10 +70,10 @@ class ProviderResultAggregator {
         const ProviderStreamTerminal.failure('incompatible_response_json'),
       );
     }
-    return addFrame(SseFrame(data: payload));
+    return addFrame(SseFrame(data: payload), complete: true);
   }
 
-  StreamEvent addFrame(SseFrame frame) {
+  StreamEvent addFrame(SseFrame frame, {bool complete = false}) {
     if (_sealed) throw StateError('provider_response_already_finished');
     _bytes += utf8.encode(jsonEncode(frame.data)).length;
     if (_bytes > maximumBytes) {
@@ -93,6 +94,8 @@ class ProviderResultAggregator {
     switch (adapter.protocolType) {
       case ProtocolType.openaiChat:
         _addChat(frame.data);
+      case ProtocolType.dashscopeText:
+        _addChat(dashscopeChatPayload(frame.data, streaming: !complete));
       case ProtocolType.openaiResponses:
         _addResponses(frame);
       case ProtocolType.anthropicMessages:

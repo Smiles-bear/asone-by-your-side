@@ -28,7 +28,7 @@ AsOne 的目标不是替用户规定一种关系，而是让每个人都能选�
 - 公开的数据模型和 `OpenCore` 能力契约；
 - SQLite 本地持久化：模型服务、助手、对话与消息保存在设备本机；
 - 本地长期记忆：按助手隔离保存，支持新增、搜索、日期筛选、编辑和删除；可从近期私聊生成候选记忆，确认后保存，单聊按相关性检索并可关闭；
-- 用户自行配置 API 的文本聊天与流式回复，兼容 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini 原生协议与 OpenRouter 推理参数；高级设置可手动选择接口协议；
+- 用户自行配置 API 的文本聊天与流式回复，兼容 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini、DashScope 原生协议与 OpenRouter 推理参数；自动检测优先尝试适合该服务和模型的原生协议，高级设置仍可指定协议；
 - 会话置顶、搜索、草稿、引用、编辑、删除等基础聊天交互；
 - 流式回复有效进展超时、累计全文兼容、结构化输出兼容、输出上限分类提示和失败内容保存；
 - DeepSeek 原生服务仅返回思考时支持一次受控恢复，模型服务检测复用已成功的 API 端点；

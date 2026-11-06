@@ -5,6 +5,7 @@ import 'openai_chat_adapter.dart';
 import 'openai_responses_adapter.dart';
 import 'anthropic_messages_adapter.dart';
 import 'gemini_adapter.dart';
+import 'dashscope_text_adapter.dart';
 
 /// 协议适配器注册表。
 ///
@@ -19,6 +20,7 @@ class AdapterRegistry {
     ProtocolType.openaiResponses: OpenAIResponsesAdapter(),
     ProtocolType.anthropicMessages: AnthropicMessagesAdapter(),
     ProtocolType.gemini: GeminiAdapter(),
+    ProtocolType.dashscopeText: DashScopeTextAdapter(),
   };
 
   /// 按协议类型获取适配器。未识别时抛异常。
