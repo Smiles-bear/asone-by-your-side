@@ -7,6 +7,7 @@ class UserFacingErrorPolicy {
   static const assistantReplyFailed = '回复失败';
   static const defaultFailureHint = '请检查网络设置后重试。';
   static const streamingInterrupted = '回复传输中断，可重新生成。';
+  static const contentPolicyRejected = '请求未通过服务商审核，请调整消息内容后重试。';
   static const outputLengthLimited = 'M005-回复达到长度上限，已保留收到的内容，可重新回答。';
   static const outputLengthWithoutBody = 'M005-回复达到本次输出上限，未生成正文，请重新回答或调整输出额度。';
   static const reasoningLengthLimited = 'M005-思考已达到本次输出上限，未生成正文，请重新回答或调整输出额度。';
@@ -25,6 +26,10 @@ class UserFacingErrorPolicy {
       if (text.contains('(no_body)')) return outputLengthWithoutBody;
       return outputLengthUnknown;
     }
+    if (error is AdapterRequestException &&
+        error.error.code == 'CONTENT_POLICY_VIOLATION') {
+      return contentPolicyRejected;
+    }
     if (hasPartialContent) return streamingInterrupted;
     if (error is AdapterRequestException) {
       if (RegExp(
@@ -36,7 +41,6 @@ class UserFacingErrorPolicy {
       return switch (error.error.code) {
         'ACCOUNT_BILLING' => '请检查服务商账户、余额或额度。',
         'MODEL_CHANNEL_UNAVAILABLE' => '该模型暂无可用渠道，请检查模型服务配置后重试。',
-        'CONTENT_POLICY_VIOLATION' => '请求未通过服务商审核，请调整消息内容后重试。',
         'AUTH_FAILED' => '请检查API配置后重试。',
         _ => error.error.message,
       };
@@ -46,7 +50,7 @@ class UserFacingErrorPolicy {
     if (const {
       '请检查服务商账户、余额或额度。',
       '该模型暂无可用渠道，请检查模型服务配置后重试。',
-      '请求未通过服务商审核，请调整消息内容后重试。',
+      contentPolicyRejected,
       '请检查API配置后重试。',
     }.contains(error.toString())) {
       return error.toString();
@@ -58,7 +62,7 @@ class UserFacingErrorPolicy {
       return '该模型暂无可用渠道，请检查模型服务配置后重试。';
     }
     if (text.contains('未通过服务商审核')) {
-      return '请求未通过服务商审核，请调整消息内容后重试。';
+      return contentPolicyRejected;
     }
     if (text.contains('模型服务协议尚未确定')) {
       return 'M006-请重新检测模型能力后重试。';

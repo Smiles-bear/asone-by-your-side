@@ -124,7 +124,9 @@ bool canFallbackToPromptJson(
   required ModelCapabilityProfile profile,
   required ModelOutputContract contract,
 }) {
-  if (result.success || transport == StructuredOutputTransport.promptJson) {
+  if (result.success ||
+      result.diagnosis.errorCode == 'CONTENT_POLICY_VIOLATION' ||
+      transport == StructuredOutputTransport.promptJson) {
     return false;
   }
   if (!profile.hasReliableTextOutput ||
@@ -137,8 +139,7 @@ bool canFallbackToPromptJson(
   final detail = result.diagnosis.detail.toLowerCase();
   final wrapped400 =
       status == 503 && RegExp(r'upstream status\s+400\b').hasMatch(detail);
-  if (!const {400, 404, 405, 415, 422, 501}.contains(status) &&
-      !wrapped400) {
+  if (!const {400, 404, 405, 415, 422, 501}.contains(status) && !wrapped400) {
     return false;
   }
   final mentionsStructuredParameter = const [

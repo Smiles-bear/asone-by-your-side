@@ -7,6 +7,7 @@ import 'package:azruiyoi_community/local_core/core_database.dart';
 import 'package:azruiyoi_community/services/model_endpoint.dart';
 import 'package:azruiyoi_community/services/provider_adapters/adapter_helpers.dart';
 import 'package:azruiyoi_community/services/provider_adapters/incremental_sse_decoder.dart';
+import 'package:azruiyoi_community/services/provider_adapters/model_output_contract.dart';
 import 'package:azruiyoi_community/services/provider_adapters/openai_chat_adapter.dart';
 import 'package:azruiyoi_community/services/provider_adapters/protocol_client.dart';
 import 'package:azruiyoi_community/services/user_facing_error_policy.dart';
@@ -49,6 +50,7 @@ String _stream({
   String text = '',
   String reasoning = '',
   String? finish = 'stop',
+  Map<String, Object?>? usage,
 }) {
   final frames = [
     {
@@ -64,6 +66,7 @@ String _stream({
           {'delta': <String, Object?>{}, 'finish_reason': finish},
         ],
       },
+    if (usage != null) {'choices': const [], 'usage': usage},
   ];
   return '${frames.map((frame) => 'data: ${jsonEncode(frame)}\n\n').join()}'
       'data: [DONE]\n\n';
@@ -287,6 +290,159 @@ void main() {
     expect(messages.last.answerStatus, MessageAnswerStatus.completed);
   });
 
+  for (final body in [
+    '{"error":{"message":"Your request was rejected by the safety system. safety_violations=[content] support: test-key"}}',
+    '{"error":{"type":"server_error","reason_code":" MODERATION_BLOCKED ","message":"blocked"}}',
+  ]) {
+    test('503 审核拒绝不重试，写入明确且脱敏的提示', () async {
+      final fixture = await _openChat([body], statuses: [503]);
+      expect(
+        await _send(fixture.core, fixture.conversationId),
+        UserFacingErrorPolicy.contentPolicyRejected,
+      );
+      expect(fixture.adapter.requests, hasLength(1));
+      await fixture.database.close();
+      final saved = (await fixture.core.messages.getMessages(
+        fixture.conversationId,
+      )).last;
+      expect(saved.answerStatus, MessageAnswerStatus.failed);
+      expect(saved.failureHint, UserFacingErrorPolicy.contentPolicyRejected);
+    });
+  }
+
+  test('Gemini SSE 审核终止保留部分正文但不算成功', () async {
+    final fixture = await _openChat(
+      [
+        'data: {"candidates":[{"content":{"parts":[{"text":"收到的部分正文"}]}}]}\n\n'
+            'data: {"candidates":[{"finishReason":"SAFETY"}]}\n\n',
+      ],
+      model: 'gemini-test',
+      protocol: ProtocolType.gemini,
+    );
+    expect(
+      await _send(fixture.core, fixture.conversationId),
+      UserFacingErrorPolicy.contentPolicyRejected,
+    );
+    expect(fixture.adapter.requests, hasLength(1));
+    final saved = (await fixture.core.messages.getMessages(
+      fixture.conversationId,
+    )).last;
+    expect(saved.content, '收到的部分正文');
+    expect(saved.answerStatus, MessageAnswerStatus.failed);
+    expect(saved.failureHint, UserFacingErrorPolicy.contentPolicyRejected);
+  });
+
+  test('审核拒绝优先于非流式结构化参数回退，诊断不回显 Key', () async {
+    final adapter = _ScriptedChatAdapter(
+      [
+        '{"error":{"reason_code":"content_safety","message":"Your request was rejected by our safety system. unsupported response_format. safety_violations=[content] support: test-key"}}',
+      ],
+      statuses: [400],
+    );
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+    final result = await ProtocolClient(dio: dio).completeForContract(
+      adapter: OpenAIChatAdapter(),
+      baseUrl: 'https://relay.example.test/v1',
+      apiKey: 'test-key',
+      modelId: 'test-model',
+      providerId: 'custom',
+      adapterVersion: 1,
+      configurationFingerprint: '',
+      capabilityProfile: const ModelCapabilityProfile(
+        textVerdict: 'supported',
+        structuredVerdict: 'supported',
+        structuredTransport: StructuredOutputTransport.jsonObject,
+      ),
+      messages: const [
+        {'role': 'user', 'content': '整理本轮内容'},
+      ],
+      contract: const ModelOutputContract.structuredJson(
+        schemaName: 'test_result',
+        schema: {'type': 'object'},
+      ),
+    );
+    expect(result.success, isFalse);
+    expect(result.diagnosis.errorCode, 'CONTENT_POLICY_VIOLATION');
+    expect(result.diagnosis.structuredTransport, 'jsonObject');
+    expect(result.diagnosis.detail, isNot(contains('test-key')));
+    expect(adapter.requests, hasLength(1));
+  });
+
+  test('HTTP 200 内嵌审核拒绝不尝试其他协议', () async {
+    final adapter = _ScriptedChatAdapter([
+      '{"error":{"code":"content_filter","message":"blocked"}}',
+    ]);
+    final dio = Dio()..httpClientAdapter = adapter;
+    addTearDown(() => dio.close(force: true));
+    final result = await ProtocolClient(dio: dio).resolveProtocol(
+      baseUrl: 'https://relay.example.test/v1',
+      apiKey: 'test-key',
+      modelId: 'test-model',
+    );
+    expect(result.success, isFalse);
+    expect(result.diagnosis.errorCode, 'CONTENT_POLICY_VIOLATION');
+    expect(adapter.requests, hasLength(1));
+  });
+
+  test('聊天只估算异常的输入计数，保留独立可信的输出计数', () async {
+    final fixture = await _openChat([
+      _stream(
+        text: '正文',
+        usage: {'prompt_tokens': -1, 'completion_tokens': 57},
+      ),
+    ]);
+    expect(await _send(fixture.core, fixture.conversationId), isNull);
+    await fixture.database.close();
+    final ledger = await fixture.database.open();
+    final record = (await ledger.query('token_usage_records')).single;
+    expect(record['input_tokens'], greaterThan(0));
+    expect(record['output_tokens'], 57);
+    expect(record['is_estimated'], 1);
+  });
+
+  test('群聊实际落库的用量归入对话而不混入功能统计', () async {
+    final fixture = await _openChat([
+      _stream(
+        text: '第一位',
+        usage: {'prompt_tokens': 40, 'completion_tokens': 5},
+      ),
+      _stream(
+        text: '第二位',
+        usage: {'prompt_tokens': 60, 'completion_tokens': 7},
+      ),
+    ]);
+    final core = fixture.core;
+    final first = (await core.modelServices.getModelServices()).single;
+    final second = await core.modelServices.createModelService({
+      'name': '群聊第二个模型',
+      'base_url': 'https://relay.example.test/v1',
+      'api_key': 'test-key',
+      'model': 'test-second',
+      'protocol_type': ProtocolType.openaiChat,
+    });
+    final room = await core.groupChat.createRoom(
+      title: '用量测试群',
+      serviceIds: [first.id, second.id],
+    );
+    final messages = await core.groupChat.sendUserMessage(
+      roomId: room.roomId,
+      content: '大家好',
+    );
+    expect(messages.map((message) => message.content), ['大家好', '第一位', '第二位']);
+    final records = await core.tokenUsage.getDetailedRecords(taskType: 'chat');
+    expect(records.map((r) => r.taskType), ['group_chat', 'group_chat']);
+    final summary = await core.tokenUsage.getSummaryByType(taskType: 'chat');
+    expect(summary.inputTokens, 100);
+    expect(summary.outputTokens, 12);
+    final daily = await core.tokenUsage.getDailyUsageByType(taskType: 'chat');
+    expect(daily.fold(0, (sum, day) => sum + day.totalTokens), 112);
+    expect(
+      await core.tokenUsage.getDetailedRecords(taskType: 'function'),
+      isEmpty,
+    );
+  });
+
   test('社区实际聊天只修正明确拒绝的参数，保留额度并复用成功策略', () async {
     final fixture = await _openChat(
       [
@@ -392,7 +548,10 @@ void main() {
 
   test('DeepSeek 正常结束但仅有思考时恢复一次，保留成功正文', () async {
     final fixture = await _openChat(
-      [_stream(reasoning: '第一次思考'), _stream(text: '恢复后的正文')],
+      [
+        _stream(reasoning: '第一次思考', usage: {'prompt_tokens': 1000}),
+        _stream(text: '恢复后的正文', usage: {'completion_tokens': 5}),
+      ],
       providerId: 'deepseek',
       model: 'deepseek-flash',
     );
@@ -405,6 +564,12 @@ void main() {
     );
     expect(messages.last.content, '恢复后的正文');
     expect(messages.last.reasoning, isNot(contains('第一次思考')));
+    final db = await fixture.database.open();
+    final usage = (await db.query('token_usage_records')).single;
+    expect(usage['input_tokens'], greaterThan(1000));
+    expect(usage['output_tokens'], greaterThan(5));
+    expect(usage['request_count'], 2);
+    expect(usage['is_estimated'], 1);
   });
 
   for (final finish in [null, 'content_filter']) {

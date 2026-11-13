@@ -8,9 +8,88 @@ class ProviderUsage {
   final String? protocol;
   final Map<String, int> values = {};
   String source = 'unreported';
-  final Set<String> anomalies = {};
+  final Set<String> _parseAnomalies = {};
+  final Set<String> _invalid = {};
   int? _baseInput;
+  int? _explicitTotal;
+  int? _geminiVisibleOutput;
   bool _exclusiveInput = false;
+
+  /// Raw counters remain available for evidence. Only this view is consumable.
+  /// Mathematical checks use the current cumulative snapshot, so an early
+  /// partial snapshot cannot permanently invalidate a later complete one.
+  Map<String, int> get validatedValues {
+    final invalid = {..._invalid};
+    final math = _mathAnomalies;
+    if (math.contains('read_exceeds_input')) {
+      invalid.addAll(['prompt_tokens', 'cache_read_tokens']);
+    }
+    if (math.contains('write_exceeds_input')) {
+      invalid.addAll(['prompt_tokens', 'cache_write_tokens']);
+    }
+    if (math.contains('cache_partition_conflict')) {
+      invalid.addAll([
+        'prompt_tokens',
+        'cache_read_tokens',
+        'cache_miss_tokens',
+      ]);
+    }
+    if (math.contains('total_conflict') ||
+        math.contains('input_total_conflict')) {
+      invalid.addAll(['prompt_tokens', 'completion_tokens', 'total_tokens']);
+    }
+    if (_exclusiveInput &&
+        (invalid.contains('cache_read_tokens') ||
+            invalid.contains('cache_write_tokens'))) {
+      invalid.add('prompt_tokens');
+    }
+    if (invalid.contains('tool_prompt_tokens')) invalid.add('prompt_tokens');
+    if (invalid.contains('reasoning_tokens')) invalid.add('completion_tokens');
+    if (invalid.contains('prompt_tokens') ||
+        invalid.contains('completion_tokens')) {
+      invalid.add('total_tokens');
+    }
+    return Map.fromEntries(
+      values.entries.where((e) => !invalid.contains(e.key)),
+    );
+  }
+
+  Set<String> get anomalies => {..._parseAnomalies, ..._mathAnomalies};
+
+  Set<String> get _mathAnomalies {
+    final result = <String>{};
+    final input = values['prompt_tokens'], output = values['completion_tokens'];
+    final read = values['cache_read_tokens'],
+        write = values['cache_write_tokens'];
+    final miss = values['cache_miss_tokens'];
+    if (input != null && !_invalid.contains('prompt_tokens')) {
+      if (read != null &&
+          !_invalid.contains('cache_read_tokens') &&
+          read > input) {
+        result.add('read_exceeds_input');
+      }
+      if (write != null &&
+          !_invalid.contains('cache_write_tokens') &&
+          write > input) {
+        result.add('write_exceeds_input');
+      }
+      if (read != null &&
+          miss != null &&
+          !_invalid.contains('cache_read_tokens') &&
+          !_invalid.contains('cache_miss_tokens') &&
+          read + miss != input) {
+        result.add('cache_partition_conflict');
+      }
+      if (output != null &&
+          _explicitTotal != null &&
+          !_invalid.contains('total_tokens') &&
+          !_invalid.contains('completion_tokens') &&
+          input + output != _explicitTotal) {
+        result.add('total_conflict');
+      }
+    }
+    return result;
+  }
 
   void addPayload(Map payload) {
     final extracted = _extractUsage(payload);
@@ -18,49 +97,70 @@ class ProviderUsage {
     final (raw: raw, source: inputSource) = extracted;
     // Output-only message_delta must not erase the message_start semantics.
     if (source == 'unreported' || _hasInput(raw)) source = inputSource;
-    final input = _count(raw, [
+    final exclusive =
+        inputSource == 'anthropic_fields' || inputSource == 'bedrock_fields';
+    final input = _count(raw, 'prompt_tokens', [
       'prompt_tokens',
       'input_tokens',
       'promptTokenCount',
       'inputTokenCount',
       'inputTokens',
-      'total_input_tokens',
+      if (!exclusive ||
+          !raw.containsKey('input_tokens') && !raw.containsKey('inputTokens'))
+        'total_input_tokens',
     ]);
     if (input != null) {
       _baseInput = input;
       _exclusiveInput =
-          inputSource == 'anthropic_fields' || inputSource == 'bedrock_fields';
+          exclusive &&
+          (raw.containsKey('input_tokens') || raw.containsKey('inputTokens'));
     }
     _readCacheUsage(raw);
+    if (inputSource == 'gemini_fields' || protocol == ProtocolType.gemini) {
+      _put(
+        'tool_prompt_tokens',
+        _count(raw, 'tool_prompt_tokens', ['toolUsePromptTokenCount']),
+      );
+    }
     if (_baseInput != null) {
       values['prompt_tokens'] =
           _baseInput! +
           (_exclusiveInput
               ? (values['cache_read_tokens'] ?? 0) +
                     (values['cache_write_tokens'] ?? 0)
-              : 0);
+              : 0) +
+          (values['tool_prompt_tokens'] ?? 0);
     }
     _put('completion_tokens', _outputTokens(raw));
-    _put('reasoning_tokens', _count(raw, ['thoughtsTokenCount']));
-    _put('cache_miss_tokens', _count(raw, ['prompt_cache_miss_tokens']));
-    final total = _count(raw, [
+    _put(
+      'reasoning_tokens',
+      _count(raw, 'reasoning_tokens', ['thoughtsTokenCount']),
+    );
+    _put(
+      'cache_miss_tokens',
+      _count(raw, 'cache_miss_tokens', ['prompt_cache_miss_tokens']),
+    );
+    final total = _count(raw, 'total_tokens', [
       'total_tokens',
       'totalTokenCount',
       'totalTokens',
     ]);
     if (total != null) {
-      _put('total_tokens', total);
+      _explicitTotal = total;
+      values['total_tokens'] = total;
     } else if (values['prompt_tokens'] != null &&
         values['completion_tokens'] != null) {
-      _put(
-        'total_tokens',
-        values['prompt_tokens']! + values['completion_tokens']!,
-      );
+      if (_explicitTotal == null) {
+        values['total_tokens'] =
+            values['prompt_tokens']! + values['completion_tokens']!;
+      }
     }
-    final totalInput = values['prompt_tokens'],
-        cached = values['cache_read_tokens'];
-    if (totalInput != null && cached != null && cached > totalInput) {
-      anomalies.add('read_exceeds_input');
+    if (_exclusiveInput && raw.containsKey('total_input_tokens')) {
+      final declared = _count(raw, 'prompt_tokens', ['total_input_tokens']);
+      if (declared != null && declared != values['prompt_tokens']) {
+        _invalid.add('prompt_tokens');
+        _parseAnomalies.add('input_total_conflict');
+      }
     }
   }
 
@@ -90,31 +190,39 @@ class ProviderUsage {
 
   void _readCacheUsage(Map raw) {
     final details = raw['prompt_tokens_details'] ?? raw['input_tokens_details'];
-    final read = _aliases([
-      if (details is Map) details['cached_tokens'],
-      raw['cache_read_tokens'],
-      raw['prompt_cache_hit_tokens'],
-      raw['cache_read_input_tokens'],
-      raw['cachedContentTokenCount'],
-      raw['cached_tokens'],
-      raw['cacheReadInputTokens'],
-      raw['total_cached_tokens'],
-    ], 'read_alias_conflict');
-    final write = _aliases([
-      if (details is Map) ...[
-        details['cache_write_tokens'],
-        details['cache_creation_input_tokens'],
+    final read = _aliases(
+      [
+        if (details is Map) details['cached_tokens'],
+        raw['cache_read_tokens'],
+        raw['prompt_cache_hit_tokens'],
+        raw['cache_read_input_tokens'],
+        raw['cachedContentTokenCount'],
+        raw['cached_tokens'],
+        raw['cacheReadInputTokens'],
+        raw['total_cached_tokens'],
       ],
-      raw['cache_write_tokens'],
-      raw['cache_creation_input_tokens'],
-      raw['cacheWriteInputTokens'],
-    ], 'write_alias_conflict');
+      'cache_read_tokens',
+      'read_alias_conflict',
+    );
+    final write = _aliases(
+      [
+        if (details is Map) ...[
+          details['cache_write_tokens'],
+          details['cache_creation_input_tokens'],
+        ],
+        raw['cache_write_tokens'],
+        raw['cache_creation_input_tokens'],
+        raw['cacheWriteInputTokens'],
+      ],
+      'cache_write_tokens',
+      'write_alias_conflict',
+    );
     _put('cache_read_tokens', read);
     _put('cache_write_tokens', write);
   }
 
   int? _outputTokens(Map raw) {
-    final visible = _count(raw, [
+    final visible = _count(raw, 'completion_tokens', [
       'completion_tokens',
       'output_tokens',
       'candidatesTokenCount',
@@ -122,12 +230,20 @@ class ProviderUsage {
       'outputTokens',
       'total_output_tokens',
     ]);
-    final thoughts = raw.containsKey('candidatesTokenCount')
-        ? (_count(raw, ['thoughtsTokenCount']) ?? 0)
+    if (raw.containsKey('candidatesTokenCount')) _geminiVisibleOutput = visible;
+    final gemini =
+        _geminiVisibleOutput != null &&
+        (raw.containsKey('candidatesTokenCount') ||
+            raw.containsKey('thoughtsTokenCount'));
+    final thoughts = gemini
+        ? (_count(raw, 'reasoning_tokens', ['thoughtsTokenCount']) ??
+              values['reasoning_tokens'] ??
+              0)
         : 0;
     // Output accounting includes Gemini thinking once; the separate reasoning
     // counter is diagnostic and must not be added again to the turn total.
-    return visible == null ? null : visible + thoughts;
+    final output = gemini ? _geminiVisibleOutput : visible;
+    return output == null ? null : output + thoughts;
   }
 
   bool _anthropic(Map raw) =>
@@ -148,22 +264,30 @@ class ProviderUsage {
     'total_input_tokens',
   ].any(raw.containsKey);
 
-  int? _count(Map raw, List<String> keys) =>
-      _aliases([for (final key in keys) raw[key]], 'input_alias_conflict');
+  int? _count(Map raw, String field, List<String> keys) => _aliases(
+    [for (final key in keys) raw[key]],
+    field,
+    '${field}_alias_conflict',
+  );
 
-  int? _aliases(List<Object?> candidates, String conflict) {
+  int? _aliases(List<Object?> candidates, String field, String conflict) {
     int? result;
     for (final candidate in candidates) {
       if (candidate == null) continue;
       if (candidate is! num ||
           !candidate.isFinite ||
           candidate < 0 ||
+          candidate > 9007199254740991 ||
           candidate != candidate.truncateToDouble()) {
-        anomalies.add('invalid_counter');
+        _parseAnomalies.add('invalid_counter');
+        _invalid.add(field);
         continue;
       }
       final value = candidate.toInt();
-      if (result != null && result != value) anomalies.add(conflict);
+      if (result != null && result != value) {
+        _parseAnomalies.add(conflict);
+        _invalid.add(field);
+      }
       result ??= value;
     }
     return result;
@@ -198,7 +322,8 @@ class ProviderUsage {
     _put('prompt_tokens', input);
     _put('cache_read_tokens', read);
     if (input != null && read != null && read > input) {
-      anomalies.add('read_exceeds_input');
+      _parseAnomalies.add('read_exceeds_input');
+      _invalid.addAll(['prompt_tokens', 'cache_read_tokens']);
     }
   }
 
@@ -210,7 +335,7 @@ class ProviderUsage {
     for (final frame in frames) {
       usage.addPayload(frame.data);
     }
-    return usage.values;
+    return usage.validatedValues;
   }
 }
 

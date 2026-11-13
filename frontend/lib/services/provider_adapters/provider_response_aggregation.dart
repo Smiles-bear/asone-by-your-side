@@ -123,7 +123,7 @@ class ProviderResultAggregator {
       reasoningDelta: afterThought.startsWith(beforeThought)
           ? afterThought.substring(beforeThought.length)
           : '',
-      usage: Map.unmodifiable(_usage.values),
+      usage: Map.unmodifiable(_usage.validatedValues),
       finishReason: _terminal.reason,
       resolvedModelId: _model,
     );
@@ -791,7 +791,7 @@ class ProviderResultAggregator {
     return ProviderResponse(
       text: text,
       reasoning: reasoning,
-      usage: Map.unmodifiable(_usage.values),
+      usage: Map.unmodifiable(_usage.validatedValues),
       usageSource: _usage.source,
       finishReason: _terminal.reason,
       terminalState: state,

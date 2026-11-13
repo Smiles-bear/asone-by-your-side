@@ -68,6 +68,7 @@ class CommunityGroupContextBuilder {
       modelSnapshot: turn.modelSnapshot,
       frozenContext: {
         'assistantId': request.step.assistantId,
+        'task_type': 'group_chat',
         'max_output_tokens': plan.maxOutputTokens,
         'timestamps_enabled': 1,
         'tools_enabled': false,

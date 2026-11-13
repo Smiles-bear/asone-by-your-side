@@ -1,12 +1,14 @@
 part of 'local_chat_service.dart';
 
+typedef _AttemptUsage = ({int input, int output, bool estimated});
+
 extension on LocalChatService {
   Future<
     ({
       String text,
       String reasoning,
       List<ProviderToolCall> toolCalls,
-      Map<String, int>? usage,
+      _AttemptUsage usage,
       int requestCount,
     })
   >
@@ -24,7 +26,7 @@ extension on LocalChatService {
     CancelToken? cancelToken,
   }) async {
     Map<String, Object?> payloadOverrides = const {};
-    Map<String, int>? recoveryUsage;
+    _AttemptUsage? recoveryUsage;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final result = await _executeModelCall(
@@ -49,26 +51,32 @@ extension on LocalChatService {
           modelId: model,
           protocolType: adapter.protocolType,
         );
+        final usage = _accountAttempt(
+          reported: result.usage,
+          messages: messages,
+          tools: tools,
+          output: '${result.reasoning}\n${result.text}',
+        );
         if (reasoningOnly &&
             attempt == 0 &&
             !(cancelToken?.isCancelled ?? false) &&
             result.terminationReason == 'finish_reason:stop' &&
             recoveryPayload.isNotEmpty) {
           payloadOverrides = recoveryPayload;
-          recoveryUsage = result.usage;
+          recoveryUsage = usage;
           continue;
         }
-        final usage = result.usage;
         return (
           text: result.text,
           reasoning: result.reasoning,
           toolCalls: result.toolCalls,
           usage: recoveryUsage == null
               ? usage
-              : <String, int>{
-                  for (final key in {...recoveryUsage.keys, ...?usage?.keys})
-                    key: (recoveryUsage[key] ?? 0) + (usage?[key] ?? 0),
-                },
+              : (
+                  input: recoveryUsage.input + usage.input,
+                  output: recoveryUsage.output + usage.output,
+                  estimated: recoveryUsage.estimated || usage.estimated,
+                ),
           requestCount: attempt + 1,
         );
       } catch (error) {
@@ -86,10 +94,32 @@ extension on LocalChatService {
     throw StateError('模型请求未完成');
   }
 
-  Future<String> _readProviderError(
-    ResponseBody? body, {
-    required String apiKey,
-  }) async {
+  // Estimate each missing side per received response, before summing retries.
+  _AttemptUsage _accountAttempt({
+    required Map<String, int>? reported,
+    required List<Map<String, Object?>> messages,
+    required List<Map<String, Object?>>? tools,
+    required String output,
+  }) {
+    final input = reported?['input_tokens'];
+    final completion = reported?['output_tokens'];
+    final planner = ChatContextWindowPlanner();
+    return (
+      input:
+          input ??
+          planner.estimateTextTokens(
+            jsonEncode({
+              'messages': messages,
+              if (tools?.isNotEmpty == true) 'tools': tools,
+            }),
+          ),
+      output: completion ?? planner.estimateTextTokens(output),
+      estimated: input == null || completion == null,
+    );
+  }
+
+  // Preserve structured codes for classification; callers never log this body.
+  Future<String> _readProviderError(ResponseBody? body) async {
     if (body == null) return '';
     final bytes = BytesBuilder(copy: false);
     const maximumBytes = 8 * 1024;
@@ -99,42 +129,8 @@ extension on LocalChatService {
       bytes.add(
         chunk.length <= remaining ? chunk : chunk.sublist(0, remaining),
       );
+      if (bytes.length >= maximumBytes) break;
     }
-    final raw = utf8.decode(bytes.takeBytes(), allowMalformed: true).trim();
-    if (raw.isEmpty) return '';
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is Map) {
-        final error = decoded['error'];
-        if (error is Map) {
-          final code = error['code']?.toString().trim() ?? '';
-          final message = error['message']?.toString().trim() ?? '';
-          return _redactProviderError(
-            [code, message].where((part) => part.isNotEmpty).join(' - '),
-            apiKey,
-          );
-        }
-        final message = decoded['message']?.toString().trim() ?? '';
-        if (message.isNotEmpty) return _redactProviderError(message, apiKey);
-      }
-    } on FormatException {
-      // 非 JSON 错误页只保留短预览，完整 HTML 不进入日志和用户界面。
-    }
-    final normalized = raw.replaceAll(RegExp(r'\s+'), ' ');
-    return _redactProviderError(
-      normalized.substring(0, math.min(500, normalized.length)),
-      apiKey,
-    );
-  }
-
-  String _redactProviderError(String value, String apiKey) {
-    var redacted = value;
-    if (apiKey.trim().isNotEmpty) {
-      redacted = redacted.replaceAll(apiKey.trim(), '[已隐藏]');
-    }
-    return redacted.replaceAll(
-      RegExp(r'Bearer\s+[A-Za-z0-9._~+/=-]+', caseSensitive: false),
-      'Bearer [已隐藏]',
-    );
+    return utf8.decode(bytes.takeBytes(), allowMalformed: true).trim();
   }
 }

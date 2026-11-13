@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -654,22 +653,9 @@ class LocalChatService {
             finalAssistantReasoning += result.reasoning;
           }
 
-          // 累积 token 使用
-          if (result.usage != null) {
-            totalInputTokens += result.usage!['input_tokens'] ?? 0;
-            totalOutputTokens += result.usage!['output_tokens'] ?? 0;
-          } else {
-            usageEstimated = true;
-            totalInputTokens += planner.estimateTextTokens(
-              jsonEncode(<String, Object?>{
-                'messages': conversationMessages,
-                if (tools.isNotEmpty) 'tools': tools,
-              }),
-            );
-            totalOutputTokens += planner.estimateTextTokens(
-              '${result.reasoning}\n${result.text}',
-            );
-          }
+          totalInputTokens += result.usage.input;
+          totalOutputTokens += result.usage.output;
+          usageEstimated = usageEstimated || result.usage.estimated;
 
           if (result.toolCalls.isEmpty) {
             if (browserTurn.continueAfterNoToolCall(
@@ -1512,10 +1498,11 @@ class LocalChatService {
           usedEndpoint = endpoint;
           final status = response.statusCode ?? 0;
           if (status < 200 || status >= 300) {
-            final providerError = await _readProviderError(
-              response.data,
-              apiKey: apiKey,
-            );
+            final providerError = await _readProviderError(response.data);
+            final failure = normalizeHttpError(status, providerError, '');
+            if (failure.code == 'CONTENT_POLICY_VIOLATION') {
+              throw AdapterRequestException(failure);
+            }
             if (parameterAttempt == 0 &&
                 parameterPolicy.adjustAfterRejection(
                   statusCode: status,
@@ -1528,13 +1515,14 @@ class LocalChatService {
                 endpoints.indexOf(endpoint) < endpoints.length - 1) {
               continue endpointLoop;
             }
-            final failure = normalizeHttpError(status, {
-              'error': {'message': providerError},
-            }, '');
             UpstreamFailurePolicy.throwIfTransientHttp(
               status,
               code: failure.code,
-              providerMessage: failure.providerMessage,
+              providerMessage: diagnosticProviderMessage(
+                failure,
+                secrets: [apiKey],
+                requestPayload: payload,
+              ),
             );
             throw AdapterRequestException(failure);
           }
@@ -1612,6 +1600,15 @@ class LocalChatService {
         ? lastEventType
         : decoded.lastEventType;
     if (decoded.terminal.isFailure) {
+      final providerFailure = streamProviderError(
+        decoded.frames,
+        terminationReason,
+        secrets: [apiKey],
+        requestPayload: payload,
+      );
+      if (providerFailure?.code == 'CONTENT_POLICY_VIOLATION') {
+        throw AdapterRequestException(providerFailure!);
+      }
       DebugLogger.instance.error(
         '模型流异常结束',
         tag: 'LocalChat',

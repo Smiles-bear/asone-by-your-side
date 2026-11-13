@@ -332,13 +332,15 @@ NormalizedError normalizeHttpError(
   // The original explanation still goes through the ordinary privacy filter.
   final safeFact = providerTechnicalFact(statusCode, serverMessage);
   final detail = _safePreview(safeFact ?? serverMessage ?? text);
-  if (_isContentPolicyViolation(map)) {
+  if (_isContentPolicyViolation(map, serverMessage)) {
     return NormalizedError(
       'CONTENT_POLICY_VIOLATION',
       '请求内容未通过服务商审核',
       statusCode: statusCode,
-      detail: detail,
-      providerMessage: providerMessage,
+      // Do not echo a rejected prompt or provider support payload.
+      providerMessage: safeProviderMessage(
+        _contentPolicyExplanation(serverMessage),
+      ),
     );
   }
 
@@ -455,17 +457,44 @@ NormalizedError normalizeHttpError(
   }
 }
 
-bool _isContentPolicyViolation(Map? response) {
+bool _isContentPolicyViolation(Map? response, String? message) {
   final error = response?['error'];
-  final code = error is Map
-      ? error['code'] ?? error['type']
-      : response?['code'];
-  return const {
+  const codes = {
     'content_policy_violation',
     'content_filter',
     'content_policy',
     'safety_violation',
-  }.contains(code);
+    'content_safety',
+    'moderation_blocked',
+  };
+  return [
+        response?['code'],
+        response?['reason_code'],
+        if (error is Map) ...[
+          error['code'],
+          error['type'],
+          error['reason_code'],
+        ],
+      ].whereType<String>().any(
+        (code) => codes.contains(code.trim().toLowerCase()),
+      ) ||
+      (message != null && _safetySystemRejection.hasMatch(message));
+}
+
+final _safetySystemRejection = RegExp(
+  r'\b(?:your|the) request was rejected by (?:the|our) safety system[.!]?',
+  caseSensitive: false,
+);
+
+String? _contentPolicyExplanation(String? message) {
+  if (message == null) return null;
+  final rejection = _safetySystemRejection.firstMatch(message)?.group(0);
+  final reason = RegExp(
+    r'\bsafety_violations\s*=\s*\[[a-z_]+(?:\s*,\s*[a-z_]+)*\]',
+    caseSensitive: false,
+  ).firstMatch(message)?.group(0);
+  if (reason == null || reason.length > 80) return rejection;
+  return rejection == null ? reason : '$rejection $reason';
 }
 
 /// 面向诊断与能力判定的安全错误说明。服务端细节已经在
@@ -519,6 +548,7 @@ NormalizedError? streamProviderError(
   Iterable<String> secrets = const [],
   Object? requestPayload,
 }) {
+  NormalizedError? firstFailure;
   for (final frame in frames) {
     final data =
         frame.data['response'] is Map &&
@@ -526,10 +556,11 @@ NormalizedError? streamProviderError(
         ? (frame.data['response'] as Map)
         : frame.data;
     if (data['error'] != null ||
+        _isContentPolicyViolation(data, _providerResponseMessage(data)) ||
         frame.eventType == 'error' ||
         data['type'] == 'error') {
       final error = normalizeHttpError(200, data, '服务商中断了请求');
-      return NormalizedError(
+      final normalized = NormalizedError(
         error.code,
         error.message,
         statusCode: error.statusCode,
@@ -539,10 +570,32 @@ NormalizedError? streamProviderError(
           requestPayload: requestPayload,
         ),
       );
+      if (normalized.code == 'CONTENT_POLICY_VIOLATION') return normalized;
+      firstFailure ??= normalized;
     }
   }
-  if (terminationReason.contains('content_filter')) {
+  if (isProviderContentPolicyTerminal(terminationReason)) {
     return const NormalizedError('CONTENT_POLICY_VIOLATION', '请求内容未通过服务商审核');
   }
-  return null;
+  return firstFailure;
+}
+
+bool isProviderContentPolicyTerminal(String terminationReason) {
+  final terminal = terminationReason.trim().toLowerCase();
+  const rejected = {
+    'safety',
+    'recitation',
+    'blocklist',
+    'prohibited_content',
+    'spii',
+    'image_safety',
+    'image_prohibited_content',
+    'content_filter',
+  };
+  final separator = terminal.indexOf(':');
+  final family = separator < 0 ? '' : terminal.substring(0, separator);
+  final reason = separator < 0 ? terminal : terminal.substring(separator + 1);
+  return terminal == 'response.incomplete:content_filter' ||
+      (const {'', 'finish_reason', 'prompt_block'}.contains(family) &&
+          rejected.contains(reason));
 }

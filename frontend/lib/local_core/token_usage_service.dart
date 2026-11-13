@@ -149,8 +149,9 @@ class TokenUsageService implements TokenUsageApi {
       return _summaryFromRow(result.single);
     }
 
-    final whereConditions = <String>['task_type = ?'];
-    final whereArgs = <dynamic>[taskType];
+    final whereConditions = <String>[];
+    final whereArgs = <dynamic>[];
+    _appendCategoryFilter(whereConditions, whereArgs, taskType);
 
     if (assistantId != null) {
       whereConditions.add('assistant_id = ?');
@@ -283,8 +284,9 @@ class TokenUsageService implements TokenUsageApi {
       return result.map(_dailyUsageFromRow).toList(growable: false);
     }
 
-    final whereConditions = <String>['task_type = ?'];
-    final whereArgs = <dynamic>[taskType];
+    final whereConditions = <String>[];
+    final whereArgs = <dynamic>[];
+    _appendCategoryFilter(whereConditions, whereArgs, taskType);
 
     if (assistantId != null) {
       whereConditions.add('assistant_id = ?');
@@ -372,8 +374,7 @@ class TokenUsageService implements TokenUsageApi {
     final whereArgs = <dynamic>[];
 
     if (taskType != null) {
-      whereConditions.add('task_type = ?');
-      whereArgs.add(taskType);
+      _appendCategoryFilter(whereConditions, whereArgs, taskType);
     }
 
     if (assistantId != null) {
@@ -407,6 +408,24 @@ class TokenUsageService implements TokenUsageApi {
     );
 
     return result.map((row) => TokenUsageRecord.fromMap(row)).toList();
+  }
+
+  static void _appendCategoryFilter(
+    List<String> conditions,
+    List<dynamic> arguments,
+    String taskType,
+  ) {
+    const dialogue = ['chat', 'group_chat'];
+    if (taskType == 'chat') {
+      conditions.add('task_type IN (?, ?)');
+      arguments.addAll(dialogue);
+    } else if (taskType == 'function') {
+      conditions.add('task_type NOT IN (?, ?, ?)');
+      arguments.addAll([...dialogue, 'memory_rebuild']);
+    } else {
+      conditions.add('task_type = ?');
+      arguments.add(taskType);
+    }
   }
 
   static void _appendMemoryUsageFilters({

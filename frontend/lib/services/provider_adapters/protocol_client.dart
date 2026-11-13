@@ -13,6 +13,7 @@ import 'model_protocol_adapter.dart';
 import 'model_output_contract.dart';
 import 'model_output_length_failure.dart';
 import 'provider_response_aggregation.dart';
+import 'provider_usage.dart';
 import 'model_parameter_policy.dart';
 import 'structured_output_receiver.dart';
 import 'protocol_types.dart';
@@ -630,6 +631,7 @@ class ProtocolClient {
             error.message ?? '',
           );
           if (attempt == 0 &&
+              normalized.code != 'CONTENT_POLICY_VIOLATION' &&
               parameterPolicy.adjustAfterRejection(
                 statusCode: status,
                 response: error.response?.data,
@@ -651,6 +653,7 @@ class ProtocolClient {
             continue;
           }
           if (status == 404 &&
+              normalized.code != 'CONTENT_POLICY_VIOLATION' &&
               endpoints.indexOf(endpoint) < endpoints.length - 1) {
             continue endpointLoop;
           }
@@ -720,6 +723,17 @@ class ProtocolClient {
       final frames = rawResponse.isEmpty
           ? const <SseFrame>[]
           : parseSseLines(const LineSplitter().convert(rawResponse)).toList();
+      final refusal = _contentRefusal(adapter, frames, apiKey, payload);
+      if (refusal != null) {
+        return _refusedCompletion(
+          adapter: adapter,
+          response: response,
+          endpoint: usedEndpoint,
+          requestId: requestId,
+          elapsedMs: watch.elapsedMilliseconds,
+          refusal: refusal,
+        );
+      }
       final textAccumulator = ProviderStreamTextAccumulator();
       for (final frame in frames) {
         textAccumulator.add(adapter.streamTextChunkFromFrame(frame));
@@ -741,6 +755,10 @@ class ProtocolClient {
           text: streamedText,
           reasoning: streamedReasoning,
           toolCalls: streamedToolCalls,
+          usage: ProviderUsage.fromFrames(
+            frames,
+            protocol: adapter.protocolType,
+          ),
           diagnosis: ProtocolDiagnosis(
             protocol: adapter.protocolType,
             endpoint: sanitizeEndpoint(usedEndpoint ?? ''),
@@ -781,11 +799,29 @@ class ProtocolClient {
         requestId: requestId,
       );
     }
+    final refusal = _contentRefusal(
+      adapter,
+      [SseFrame(data: payload2)],
+      apiKey,
+      payload,
+    );
+    if (refusal != null) {
+      return _refusedCompletion(
+        adapter: adapter,
+        response: response,
+        endpoint: usedEndpoint,
+        requestId: requestId,
+        elapsedMs: watch.elapsedMilliseconds,
+        refusal: refusal,
+      );
+    }
     final text = adapter.extractText(payload2);
     final reasoning = adapter.extractReasoning(payload2);
     final toolCalls = adapter.extractToolCalls(payload2);
     final finishReason = _finishReason(payload2, adapter.protocolType);
-    final usage = _normalizedUsage(payload2);
+    final usage = (ProviderUsage(
+      protocol: adapter.protocolType,
+    )..addPayload(payload2)).validatedValues;
     final responseModel =
         payload2['model'] as String? ??
         payload2['modelVersion'] as String? ??
@@ -841,41 +877,59 @@ class ProtocolClient {
     );
   }
 
+  NormalizedError? _contentRefusal(
+    ModelProtocolAdapter adapter,
+    List<SseFrame> frames,
+    String apiKey,
+    Map<String, Object?> payload,
+  ) {
+    // Check frames individually: a generic wrapper error must not mask a
+    // distinct refusal terminal later in a buffered stream.
+    for (final frame in frames) {
+      final failure = streamProviderError(
+        [frame],
+        adapter.streamTerminalFromFrame(frame).reason,
+        secrets: [apiKey],
+        requestPayload: payload,
+      );
+      if (failure?.code == 'CONTENT_POLICY_VIOLATION') return failure;
+    }
+    return null;
+  }
+
+  ProtocolCallResult _refusedCompletion({
+    required ModelProtocolAdapter adapter,
+    required Response<dynamic> response,
+    required String? endpoint,
+    required String requestId,
+    required int elapsedMs,
+    required NormalizedError refusal,
+  }) {
+    _recorder?.updateResponse(requestId, '', error: refusal.message);
+    return ProtocolCallResult(
+      success: false,
+      text: '',
+      diagnosis: ProtocolDiagnosis(
+        protocol: adapter.protocolType,
+        endpoint: sanitizeEndpoint(endpoint ?? ''),
+        requestSent: true,
+        statusCode: response.statusCode,
+        contentType: _contentType(response),
+        elapsedMs: max(1, elapsedMs),
+        errorCode: refusal.code,
+        detail: refusal.message,
+        providerMessage: refusal.providerMessage,
+      ),
+      requestId: requestId,
+    );
+  }
+
   bool _isLengthFinish(String value) {
     final normalized = value.trim().toLowerCase();
     return normalized == 'length' ||
         normalized == 'max_tokens' ||
         normalized == 'max_output_tokens' ||
         normalized == 'max_tokens_reached';
-  }
-
-  Map<String, Object?> _normalizedUsage(Map<dynamic, dynamic> payload) {
-    final nestedResponse = payload['response'];
-    final raw =
-        payload['usage'] ??
-        payload['usageMetadata'] ??
-        (nestedResponse is Map ? nestedResponse['usage'] : null);
-    if (raw is! Map) return const {};
-    int number(Object? value) => value is num ? value.toInt() : 0;
-    final prompt = number(
-      raw['prompt_tokens'] ??
-          raw['input_tokens'] ??
-          raw['promptTokenCount'] ??
-          raw['inputTokenCount'],
-    );
-    final completion = number(
-      raw['completion_tokens'] ??
-          raw['output_tokens'] ??
-          raw['candidatesTokenCount'] ??
-          raw['outputTokenCount'],
-    );
-    if (prompt == 0 && completion == 0) return const {};
-    final total = number(raw['total_tokens'] ?? raw['totalTokenCount']);
-    return <String, Object?>{
-      'prompt_tokens': prompt,
-      'completion_tokens': completion,
-      'total_tokens': total > 0 ? total : prompt + completion,
-    };
   }
 
   bool _containsCompleteSvg(String value) {
@@ -976,17 +1030,18 @@ class ProtocolClient {
         statusCode = response.statusCode;
         if (statusCode == null || statusCode < 200 || statusCode >= 300) {
           final rawError = await _readStreamErrorBody(response.data);
-          if (statusCode == 404 &&
-              endpoints.indexOf(endpoint) < endpoints.length - 1) {
-            response = null;
-            continue;
-          }
-          watch.stop();
           final normalized = normalizeHttpError(
             statusCode ?? 0,
             rawError,
             'HTTP ${statusCode ?? 0}',
           );
+          if (statusCode == 404 &&
+              normalized.code != 'CONTENT_POLICY_VIOLATION' &&
+              endpoints.indexOf(endpoint) < endpoints.length - 1) {
+            response = null;
+            continue;
+          }
+          watch.stop();
           final detail = diagnosticErrorDetail(normalized, secrets: [apiKey]);
           _recorder?.updateResponse(requestId, '', error: detail);
           return ProtocolStreamResult(
@@ -1094,15 +1149,23 @@ class ProtocolClient {
         text.length,
       );
       if (decoded.terminal.isFailure) {
-        final detail = decoded.terminal.reason == 'finish_reason:length'
-            ? ModelOutputLengthFailure(
-                outputLimit: maxTokens ?? 0,
-                textLength: text.length,
-                reasoningLength: reasoningBuffer.length,
-                hasVisibleText: text.trim().isNotEmpty,
-                hasToolCalls: toolCalls.isNotEmpty,
-              ).message
-            : '流式响应异常（${decoded.terminal.reason}）';
+        final refusal = _contentRefusal(
+          adapter,
+          decoded.frames,
+          apiKey,
+          payload,
+        );
+        final detail =
+            refusal?.message ??
+            (decoded.terminal.reason == 'finish_reason:length'
+                ? ModelOutputLengthFailure(
+                    outputLimit: maxTokens ?? 0,
+                    textLength: text.length,
+                    reasoningLength: reasoningBuffer.length,
+                    hasVisibleText: text.trim().isNotEmpty,
+                    hasToolCalls: toolCalls.isNotEmpty,
+                  ).message
+                : '流式响应异常（${decoded.terminal.reason}）');
         _recorder?.updateResponse(
           requestId,
           text,
@@ -1128,6 +1191,7 @@ class ProtocolClient {
             elapsedMs: max(1, elapsedMs),
             sseEventTypes: decoded.eventTypes,
             errorCode: UpstreamFailurePolicy.diagnosticCode(
+              code: refusal?.code ?? '',
               reason: decoded.terminal.reason,
               fallback: 'UPSTREAM_ERROR',
             ),

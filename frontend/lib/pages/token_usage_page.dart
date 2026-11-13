@@ -611,6 +611,8 @@ class _TokenUsagePageState extends State<TokenUsagePage> {
     switch (taskType) {
       case 'chat':
         return '对话';
+      case 'group_chat':
+        return '群聊';
       case 'memory_rebuild':
         return '记忆整理';
       case 'function':
