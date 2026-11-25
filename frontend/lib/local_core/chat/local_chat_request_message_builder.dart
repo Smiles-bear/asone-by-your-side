@@ -59,6 +59,8 @@ class LocalChatRequestMessageBuilder {
     'world_schedule' => '【当前世界日程】',
     'world_current_space' => '【当前世界空间】',
     'world_dynamic' => '【当前相关世界资料】',
+    'world_entries' => '【设定条目】',
+    'world_entry_relevant' => '【相关资料】',
     'game_interaction' => '【最近游戏互动】',
     'game_summary' => '【游戏记录】',
     'relevant_history' => '【相关聊天历史】',

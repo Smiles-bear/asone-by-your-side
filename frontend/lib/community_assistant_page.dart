@@ -13,6 +13,7 @@ import 'community_chat_page.dart';
 import 'community_assistant_form_page.dart';
 import 'community_memory_page.dart';
 import 'community_assistant_settings.dart';
+import 'community_world_page.dart';
 
 /// 社区版助手页：沿用正式版列表的视觉结构，只保留本地助手和 API 对话入口。
 class CommunityAssistantListPage extends StatefulWidget {
@@ -111,6 +112,11 @@ class _CommunityAssistantListPageState
               onTap: () => Navigator.pop(context, 'settings'),
             ),
             ListTile(
+              leading: const Icon(Icons.public),
+              title: const Text('世界设定'),
+              onTap: () => Navigator.pop(context, 'world'),
+            ),
+            ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('用户资料'),
               onTap: () => Navigator.pop(context, 'profile'),
@@ -135,6 +141,14 @@ class _CommunityAssistantListPageState
       ),
     );
     if (!mounted || action == null) return;
+    if (action == 'world') {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => CommunityWorldPage(assistant: assistant),
+        ),
+      );
+      return;
+    }
     if (action == 'settings' || action == 'profile') {
       await openCommunityAssistantSettings(
         context,

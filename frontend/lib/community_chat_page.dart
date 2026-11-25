@@ -20,6 +20,7 @@ import 'widgets/asone_icons.dart';
 import 'community_chat_search_page.dart';
 import 'community_memory_page.dart';
 import 'community_assistant_settings.dart';
+import 'community_world_page.dart';
 import 'community_group_page.dart';
 import 'public_core.dart';
 
@@ -193,6 +194,11 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
       rowHeight: 48,
       entries: const [
         AnchoredPopupMenuEntry(
+          value: 'world',
+          label: '世界设定',
+          icon: AsOneIconName.document,
+        ),
+        AnchoredPopupMenuEntry(
           value: 'settings',
           label: '系统设定',
           icon: AsOneIconName.settings,
@@ -226,6 +232,14 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
     );
     if (!mounted) return;
     switch (selected) {
+      case 'world':
+        final assistant = _assistant;
+        if (assistant == null) return;
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => CommunityWorldPage(assistant: assistant),
+          ),
+        );
       case 'settings':
       case 'profile':
         final assistant = _assistant;

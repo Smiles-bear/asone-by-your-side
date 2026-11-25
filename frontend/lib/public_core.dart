@@ -15,6 +15,8 @@ import 'services/model_discovery_service.dart';
 
 import 'community_open_core.dart';
 import 'community_memory_service.dart';
+import 'community_world_service.dart';
+import 'local_core/world/world_entry_store.dart';
 import 'community_chat_context_compiler.dart';
 import 'community_group_context_builder.dart';
 import 'community_group_round_engine.dart';
@@ -35,9 +37,15 @@ class PublicCore implements OpenCore {
     repository = CoreRepository(coreDatabase: this.database);
     memories = MemoryStore(coreDatabase: this.database);
     memory = CommunityMemoryService(repository: repository, store: memories);
+    worlds = WorldEntryStore(coreDatabase: this.database);
+    worldOrganizer = CommunityWorldService(
+      repository: repository,
+      store: worlds,
+    );
     chatContext = CommunityChatContextCompiler(
       repository: repository,
       memories: memories,
+      worlds: worlds,
     );
     chat = LocalChatService(
       coreDatabase: this.database,
@@ -95,6 +103,8 @@ class PublicCore implements OpenCore {
   late final CoreRepository repository;
   late final MemoryStore memories;
   late final CommunityMemoryService memory;
+  late final WorldEntryStore worlds;
+  late final CommunityWorldService worldOrganizer;
   late final CommunityChatContextCompiler chatContext;
   late final LocalChatService chat;
   @override

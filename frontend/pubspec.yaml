@@ -16,6 +16,8 @@ dependencies:
     path: packages/asone_contracts
   asone_demo_core:
     path: packages/asone_demo_core
+  archive: ^4.2.0
+  characters: ^1.4.0
   collection: ^1.19.1
   crypto: ^3.0.6
   cryptography: ^2.9.0

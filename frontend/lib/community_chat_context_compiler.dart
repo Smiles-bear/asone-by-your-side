@@ -4,6 +4,8 @@ import 'local_core/chat/chat_engine_strategies.dart';
 import 'local_core/chat_retrieval_context.dart';
 import 'local_core/core_repository.dart';
 import 'local_core/memory/memory_store.dart';
+import 'local_core/world/world_entry_store.dart';
+import 'local_core/world/world_context_builder.dart';
 
 /// 社区版共享聊天引擎的最小上下文实现。
 ///
@@ -13,11 +15,14 @@ class CommunityChatContextCompiler implements ChatContextCompiler {
   CommunityChatContextCompiler({
     required CoreRepository repository,
     MemoryStore? memories,
+    WorldEntryStore? worlds,
   }) : _repository = repository,
-       _memories = memories;
+       _memories = memories,
+       _worlds = worlds;
 
   final CoreRepository _repository;
   final MemoryStore? _memories;
+  final WorldEntryStore? _worlds;
 
   Future<String> primaryConversationId(String assistantId) async =>
       (await _repository.getOrCreatePrimaryConversation(assistantId)).id;
@@ -90,6 +95,14 @@ class CommunityChatContextCompiler implements ChatContextCompiler {
       memories: retrieved,
       history: const [],
     );
+    var worldParts = const <Map<String, String>>[];
+    final worlds = _worlds;
+    if (includeAssistantSettings && worlds != null) {
+      await worlds.prepare();
+      worldParts = (await WorldContextBuilder(
+        coreDatabase: worlds.database,
+      ).build(assistantId: assistantId, query: query)).allParts;
+    }
     return ChatEngineTurnContext(
       assistantId: assistantId,
       modelSnapshot: ModelBindingSnapshot(
@@ -112,6 +125,7 @@ class CommunityChatContextCompiler implements ChatContextCompiler {
         // passing only all_system_parts would silently discard retrieved memory.
         'retrieval_context': retrievalContext.toJsonString(),
         'all_system_parts': <Map<String, String>>[
+          ...worldParts,
           if (includeAssistantSettings) ...[
             if (assistant.systemPrompt.trim().isNotEmpty)
               {
