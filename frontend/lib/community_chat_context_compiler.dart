@@ -29,6 +29,7 @@ class CommunityChatContextCompiler implements ChatContextCompiler {
     String? excludedMessageId,
     String? currentMessageId,
     bool includeMemories = true,
+    bool includeAssistantSettings = true,
   }) async {
     final conversation = await _repository.getConversation(conversationId);
     if (conversation == null) throw StateError('对话不存在：$conversationId');
@@ -111,6 +112,25 @@ class CommunityChatContextCompiler implements ChatContextCompiler {
         // passing only all_system_parts would silently discard retrieved memory.
         'retrieval_context': retrievalContext.toJsonString(),
         'all_system_parts': <Map<String, String>>[
+          if (includeAssistantSettings) ...[
+            if (assistant.systemPrompt.trim().isNotEmpty)
+              {
+                'kind': 'custom_instructions',
+                'content': assistant.systemPrompt,
+              },
+            if (assistant.communicationStyle.trim().isNotEmpty)
+              {
+                'kind': 'communication_style',
+                'content': assistant.communicationStyle,
+              },
+            if (assistant.behaviorBoundaries.trim().isNotEmpty)
+              {
+                'kind': 'behavior_boundaries',
+                'content': assistant.behaviorBoundaries,
+              },
+            if (assistant.userProfile.trim().isNotEmpty)
+              {'kind': 'user_profile', 'content': assistant.userProfile},
+          ],
           if (retrieved.isNotEmpty)
             {
               'kind': 'system_hint',

@@ -290,6 +290,53 @@ void main() {
     expect(messages.last.answerStatus, MessageAnswerStatus.completed);
   });
 
+  test('助手设定和用户资料重开后进入实际请求且不读取其他助手资料', () async {
+    final fixture = await _openChat([_stream(text: '已按设定回复')]);
+    final core = fixture.core;
+    final conversation = (await core.repository.getConversation(
+      fixture.conversationId,
+    ))!;
+    final assistantId = conversation.assistantId!;
+    await core.assistants.updateAssistant(assistantId, {
+      'system_prompt': '当前助手专属系统设定',
+      'communication_style': '用简洁中文交流',
+      'behavior_boundaries': '重要决定先确认',
+    });
+    await core.assistants.updateUserProfile(
+      assistantId,
+      userProfile: '当前用户资料：喜欢爵士乐',
+    );
+    final other = await core.assistants.createAssistant(name: '另一个助手');
+    await core.assistants.updateUserProfile(
+      other.id,
+      userProfile: '其他助手专属资料不得出现',
+    );
+    await fixture.database.close();
+    expect(await _send(core, fixture.conversationId), isNull);
+    final messages = fixture.adapter.requests.last['messages'] as List;
+    final system = messages.where((item) => (item as Map)['role'] == 'system');
+    for (final expected in [
+      '当前助手专属系统设定',
+      '用简洁中文交流',
+      '重要决定先确认',
+      '当前用户资料：喜欢爵士乐',
+    ]) {
+      expect(system.toString(), contains(expected));
+    }
+    expect(system.toString(), isNot(contains('其他助手专属资料不得出现')));
+    await core.assistants.updateAssistant(assistantId, {
+      'system_prompt': '',
+      'communication_style': '',
+      'behavior_boundaries': '',
+    });
+    await core.assistants.updateUserProfile(assistantId, userProfile: '');
+    expect(await _send(core, fixture.conversationId), isNull);
+    final cleared = (fixture.adapter.requests.last['messages'] as List).where(
+      (item) => (item as Map)['role'] == 'system',
+    );
+    expect(cleared, isEmpty);
+  });
+
   for (final body in [
     '{"error":{"message":"Your request was rejected by the safety system. safety_violations=[content] support: test-key"}}',
     '{"error":{"type":"server_error","reason_code":" MODERATION_BLOCKED ","message":"blocked"}}',

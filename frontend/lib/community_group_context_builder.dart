@@ -34,6 +34,7 @@ class CommunityGroupContextBuilder {
       conversationId: conversationId,
       query: request.triggerMessage?.content ?? '',
       includeMemories: false,
+      includeAssistantSettings: false,
     );
     final history = await _messages.listMessages(
       request.roomId,

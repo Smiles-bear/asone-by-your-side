@@ -6,6 +6,7 @@ import 'package:azruiyoi_community/services/provider_adapters/protocol_client.da
 import 'package:azruiyoi_community/public_core.dart';
 import 'package:azruiyoi_community/community_memory_service.dart';
 import 'package:azruiyoi_community/community_memory_page.dart';
+import 'package:azruiyoi_community/community_assistant_settings.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -54,6 +55,83 @@ _fixture() async {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   sqfliteFfiInit();
+
+  testWidgets('复用的设定与资料编辑页使用最新助手并保存到同一数据库', (tester) async {
+    final f = (await tester.runAsync(_fixture))!;
+    OpenCoreBinding.attach(f.core);
+    await tester.runAsync(
+      () => f.core.assistants.updateAssistant(f.assistant.id, {
+        'system_prompt': '列表打开后更新的设定',
+      }),
+    );
+    Future<void> drain() async {
+      for (var step = 0; step < 12; step++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
+        );
+        await tester.pump();
+      }
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Column(
+              children: [
+                TextButton(
+                  onPressed: () {
+                    openCommunityAssistantSettings(context, f.assistant.id);
+                  },
+                  child: const Text('打开设定'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    openCommunityAssistantSettings(
+                      context,
+                      f.assistant.id,
+                      userProfile: true,
+                    );
+                  },
+                  child: const Text('打开资料'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开设定'));
+    await drain();
+    await tester.pumpAndSettle();
+    expect(find.text('列表打开后更新的设定'), findsOneWidget);
+    await tester.enterText(find.byType(TextField).first, 'UI保存的系统设定');
+    await tester.pump(const Duration(milliseconds: 600));
+    await drain();
+    expect(
+      (await tester.runAsync(
+        () => f.core.assistants.getAssistant(f.assistant.id),
+      ))!.systemPrompt,
+      'UI保存的系统设定',
+    );
+    await tester.tap(find.byTooltip('返回'));
+    await drain();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('打开资料'));
+    await drain();
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'UI保存的用户资料');
+    await tester.tap(find.text('保存'));
+    await drain();
+    await tester.pumpAndSettle();
+    expect(
+      await tester.runAsync(
+        () => f.core.assistants.getUserProfile(f.assistant.id),
+      ),
+      'UI保存的用户资料',
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   test('记忆增改搜索、版本冲突和删除隔离在数据库重开后保留', () async {
     final f = await _fixture();

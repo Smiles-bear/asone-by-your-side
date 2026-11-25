@@ -19,6 +19,7 @@ import 'widgets/asone_icons.dart';
 
 import 'community_chat_search_page.dart';
 import 'community_memory_page.dart';
+import 'community_assistant_settings.dart';
 import 'community_group_page.dart';
 import 'public_core.dart';
 
@@ -192,6 +193,16 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
       rowHeight: 48,
       entries: const [
         AnchoredPopupMenuEntry(
+          value: 'settings',
+          label: '系统设定',
+          icon: AsOneIconName.settings,
+        ),
+        AnchoredPopupMenuEntry(
+          value: 'profile',
+          label: '用户资料',
+          icon: AsOneIconName.document,
+        ),
+        AnchoredPopupMenuEntry(
           value: 'memory',
           label: '记忆',
           icon: AsOneIconName.document,
@@ -215,6 +226,16 @@ class _CommunityChatPageState extends State<CommunityChatPage> {
     );
     if (!mounted) return;
     switch (selected) {
+      case 'settings':
+      case 'profile':
+        final assistant = _assistant;
+        if (assistant == null) return;
+        await openCommunityAssistantSettings(
+          context,
+          assistant.id,
+          userProfile: selected == 'profile',
+        );
+        if (mounted) await _load();
       case 'memory':
         final assistant = _assistant;
         if (assistant != null) {

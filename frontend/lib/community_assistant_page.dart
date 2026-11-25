@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'community_chat_page.dart';
 import 'community_assistant_form_page.dart';
 import 'community_memory_page.dart';
+import 'community_assistant_settings.dart';
 
 /// 社区版助手页：沿用正式版列表的视觉结构，只保留本地助手和 API 对话入口。
 class CommunityAssistantListPage extends StatefulWidget {
@@ -105,6 +106,16 @@ class _CommunityAssistantListPageState
         child: Wrap(
           children: [
             ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('系统设定'),
+              onTap: () => Navigator.pop(context, 'settings'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('用户资料'),
+              onTap: () => Navigator.pop(context, 'profile'),
+            ),
+            ListTile(
               leading: const Icon(Icons.psychology_outlined),
               title: const Text('记忆'),
               onTap: () => Navigator.pop(context, 'memory'),
@@ -124,6 +135,15 @@ class _CommunityAssistantListPageState
       ),
     );
     if (!mounted || action == null) return;
+    if (action == 'settings' || action == 'profile') {
+      await openCommunityAssistantSettings(
+        context,
+        assistant.id,
+        userProfile: action == 'profile',
+      );
+      if (mounted) await _loadAssistants();
+      return;
+    }
     if (action == 'memory') {
       await Navigator.of(context).push<void>(
         MaterialPageRoute(
